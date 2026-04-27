@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>amdgpu 功能脑图</title>
+<style>
+  :root {
+    --bg: #0e0f11;
+    --bg2: #161820;
+    --bg3: #1e2028;
+    --border: rgba(255,255,255,0.08);
+    --border2: rgba(255,255,255,0.15);
+    --text: #e8e6e0;
+    --text2: #9c9a92;
+    --text3: #5f5e5a;
+    --purple: #7f77dd;
+    --purple-light: #afa9ec;
+    --teal: #1d9e75;
+    --teal-light: #5dcaa5;
+    --amber: #ba7517;
+    --amber-light: #ef9f27;
+    --col-min-width: 230px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 40px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+  header span { font-size: 11px; color: var(--text3); letter-spacing: 0.05em; }
+
+  .mm-wrap { padding: 32px 40px 48px; }
+  .mm-root { display: flex; justify-content: center; margin-bottom: 0; }
+  .mm-root-node {
+    background: #26215c; border: 1px solid #534ab7; border-radius: 10px;
+    padding: 10px 32px; text-align: center; cursor: pointer; transition: opacity .15s;
+  }
+  .mm-root-node:hover { opacity: .85; }
+  .mm-root-node .nt { font-size: 15px; font-weight: 600; color: #afa9ec; }
+  .mm-root-node .ns { font-size: 11px; color: #7f77dd; margin-top: 2px; }
+
+  .mm-cols {
+    display: flex;
+    flex-direction: row;
+    gap: 18px;
+    margin-top: 28px;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 12px;
+    scroll-snap-type: x proximity;
+  }
+  .mm-cols::-webkit-scrollbar { height: 8px; }
+  .mm-cols::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 4px; }
+  .mm-cols::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+  .mm-cols::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+  .mm-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 0 0 var(--col-min-width);
+    min-width: var(--col-min-width);
+    scroll-snap-align: start;
+  }
+  .mm-col-line { width: 1px; height: 24px; background: rgba(255,255,255,0.15); }
+
+  .mm-l1 {
+    width: 100%; border-radius: 10px; padding: 10px 14px; text-align: center;
+    cursor: pointer; transition: opacity .15s; border-width: 1px; border-style: solid;
+  }
+  .mm-l1:hover { opacity: .85; }
+  .mm-l1 .nt { font-size: 13px; font-weight: 600; }
+  .mm-l1 .ns { font-size: 11px; margin-top: 2px; }
+  .mm-l1.teal  { background: #04342c; border-color: #0f6e56; }
+  .mm-l1.teal  .nt { color: #5dcaa5; } .mm-l1.teal  .ns { color: #1d9e75; }
+
+  .mm-l2-row, .mm-l3-row { display: grid; gap: 8px; width: 100%; margin-top: 12px; }
+  .mm-l2-row.cols1, .mm-l3-row.cols1 { grid-template-columns: 1fr; }
+  .mm-l2-row.cols2, .mm-l3-row.cols2 { grid-template-columns: 1fr 1fr; }
+  .mm-l2-row.cols3, .mm-l3-row.cols3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .mm-l2 {
+    border-radius: 7px; padding: 8px 6px; text-align: center;
+    cursor: pointer; transition: opacity .15s; border-width: 1px; border-style: solid;
+  }
+  .mm-l2:hover { opacity: .82; }
+  .mm-l2 .nt { font-size: 12px; font-weight: 600; }
+  .mm-l2 .ns { font-size: 10px; margin-top: 2px; }
+  .mm-l2.teal  { background: #04342c; border-color: #0f6e56; }
+  .mm-l2.teal  .nt { color: #5dcaa5; } .mm-l2.teal  .ns { color: #1d9e75; }
+  .mm-l2.amber { background: #412402; border-color: #854f0b; border-width: 1.5px; }
+  .mm-l2.amber .nt { color: #ef9f27; } .mm-l2.amber .ns { color: #ba7517; }
+
+  .mm-l3 {
+    border-radius: 6px; padding: 6px 4px; text-align: center;
+    cursor: pointer; transition: opacity .15s; border-width: 1px; border-style: solid; opacity: .8;
+  }
+  .mm-l3:hover { opacity: 1; }
+  .mm-l3 .nt { font-size: 11px; font-weight: 600; }
+  .mm-l3 .ns { font-size: 10px; margin-top: 1px; }
+  .mm-l3.teal  { background: #04342c; border-color: #085041; }
+  .mm-l3.teal  .nt { color: #9fe1cb; } .mm-l3.teal  .ns { color: #1d9e75; }
+  .mm-l3.amber { background: #412402; border-color: #5a3506; }
+  .mm-l3.amber .nt { color: #f5d49b; } .mm-l3.amber .ns { color: #ba7517; }
+
+  .mm-detail {
+    display: none; margin-top: 20px;
+    background: #1e2028; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 18px 22px;
+  }
+  .mm-detail.show { display: block; }
+  .mm-detail-title { font-size: 13px; font-weight: 600; color: #e8e6e0; margin-bottom: 6px; }
+  .mm-detail-sub   { font-size: 11px; color: #5dcaa5; margin-bottom: 10px; letter-spacing: .03em; }
+  .mm-detail-body  { font-size: 12px; color: #9c9a92; line-height: 1.8; }
+  .mm-detail-body code {
+    background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5dcaa5;
+  }
+  .mm-detail-close {
+    float: right; background: none; border: none; color: #5f5e5a;
+    font-size: 16px; cursor: pointer; line-height: 1; padding: 0; margin-left: 8px;
+  }
+  .mm-detail-close:hover { color: #9c9a92; }
+
+  .mm-tagline {
+    text-align: center; font-size: 11px; color: rgba(255,255,255,0.25);
+    margin-top: 24px; letter-spacing: .03em;
+  }
+  .mm-scroll-hint {
+    font-size: 10px; color: var(--text3); text-align: right;
+    margin-top: 12px; letter-spacing: .04em;
+  }
+  footer {
+    padding: 16px 40px;
+    border-top: 1px solid var(--border);
+    color: var(--text3);
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>amdgpu 功能脑图</h1>
+  <span>Linux kernel DRM/KMS GPU driver · drivers/gpu/drm/amd/</span>
+</header>
+
+<div class="mm-wrap">
+
+  <!-- ROOT -->
+  <div class="mm-root">
+    <div class="mm-root-node" onclick="showDetail('root')">
+      <div class="nt">amdgpu</div>
+      <div class="ns">AMD GPU kernel driver — GFX / display / power / RAS</div>
+    </div>
+  </div>
+
+  <div class="mm-scroll-hint">← 横向滚动查看更多 →</div>
+
+  <div class="mm-cols">
+
+    <!-- ── Column A: 设备初始化与生命周期 ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1a')">
+        <div class="nt">设备初始化与生命周期</div>
+        <div class="ns">probe / reset / PM</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2a1')">
+          <div class="nt">PCI Probe</div>
+          <div class="ns">设备枚举与绑定</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2a2')">
+          <div class="nt">IP Block 枚举</div>
+          <div class="ns">SOC 功能模块发现</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2a3')">
+          <div class="nt">GPU Reset</div>
+          <div class="ns">soft/hard reset 路径</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2a4')">
+          <div class="nt">Suspend / Resume</div>
+          <div class="ns">S3/S4 电源状态</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols2">
+        <div class="mm-l3 teal" onclick="showDetail('l3a1')">
+          <div class="nt">amdgpu_device_init</div>
+          <div class="ns">主初始化序列</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3a2')">
+          <div class="nt">ASIC funcs 表</div>
+          <div class="ns">per-generation 派发</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column B: 命令提交与 GPU 调度 ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1b')">
+        <div class="nt">命令提交与调度</div>
+        <div class="ns">CS / ring / drm_sched</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2b1')">
+          <div class="nt">Ring Buffer</div>
+          <div class="ns">GFX/SDMA/Compute ring</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2b2')">
+          <div class="nt">Indirect Buffer</div>
+          <div class="ns">IB 构建与提交</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols1">
+        <div class="mm-l2 teal" onclick="showDetail('l2b3')">
+          <div class="nt">GPU Scheduler</div>
+          <div class="ns">drm_gpu_scheduler — 多队列优先级</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols3">
+        <div class="mm-l3 teal" onclick="showDetail('l3b1')">
+          <div class="nt">fence / sync</div>
+          <div class="ns">dma_fence 信号</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3b2')">
+          <div class="nt">job 超时</div>
+          <div class="ns">watchdog & reset</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3b3')">
+          <div class="nt">MES</div>
+          <div class="ns">微引擎调度 (GFX11+)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column C: 内存管理 ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1c')">
+        <div class="nt">内存管理</div>
+        <div class="ns">BO / GTT / VRAM / 页表</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2c1')">
+          <div class="nt">BO 分配</div>
+          <div class="ns">VRAM / GTT / CPU 可见</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2c2')">
+          <div class="nt">BO 迁移</div>
+          <div class="ns">eviction / swap-in 策略</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2c3')">
+          <div class="nt">GPU 虚拟地址</div>
+          <div class="ns">VM / 页表树管理</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2c4')">
+          <div class="nt">MMU Notifier</div>
+          <div class="ns">CPU side unmap 感知</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols2">
+        <div class="mm-l3 teal" onclick="showDetail('l3c1')">
+          <div class="nt">TTM 集成</div>
+          <div class="ns">ttm_bo_driver 实现</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3c2')">
+          <div class="nt">XGMI / hive</div>
+          <div class="ns">多 GPU 统一地址</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column D: 显示子系统 (DC) ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1d')">
+        <div class="nt">显示子系统 (DC)</div>
+        <div class="ns">atomic modesetting / overlay</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2d1')">
+          <div class="nt">Atomic Commit</div>
+          <div class="ns">drm_atomic 状态机</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2d2')">
+          <div class="nt">Overlay Planes</div>
+          <div class="ns">MPO 多平面覆盖</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2d3')">
+          <div class="nt">色彩管理</div>
+          <div class="ns">HDR / 3D LUT / 色域</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2d4')">
+          <div class="nt">音频输出</div>
+          <div class="ns">HDMI/DP audio endpoint</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols2">
+        <div class="mm-l3 teal" onclick="showDetail('l3d1')">
+          <div class="nt">DCN HW 抽象</div>
+          <div class="ns">DCN 1.x / 2.x / 3.x</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3d2')">
+          <div class="nt">PSR / ABM</div>
+          <div class="ns">面板省电特性</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column E: 电源管理 (powerplay/SMU) ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1e')">
+        <div class="nt">电源管理</div>
+        <div class="ns">powerplay / SMU / BACO</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2e1')">
+          <div class="nt">频率/电压调节</div>
+          <div class="ns">P-state / DPM 表</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2e2')">
+          <div class="nt">Thermal 管理</div>
+          <div class="ns">温控 / 降频保护</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2e3')">
+          <div class="nt">BACO / BOCO</div>
+          <div class="ns">Bus Active / Clock-Off</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2e4')">
+          <div class="nt">功耗上限</div>
+          <div class="ns">TDP / TGP capping</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols2">
+        <div class="mm-l3 teal" onclick="showDetail('l3e1')">
+          <div class="nt">SMU 消息</div>
+          <div class="ns">host→firmware 命令</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3e2')">
+          <div class="nt">hwmon sysfs</div>
+          <div class="ns">温度/频率暴露给用户</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column F: 固件与微控制器 / RAS ── -->
+    <div class="mm-col">
+      <div class="mm-col-line"></div>
+      <div class="mm-l1 teal" onclick="showDetail('l1f')">
+        <div class="nt">固件与 RAS</div>
+        <div class="ns">PSP / VCN / SDMA / ECC</div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2f1')">
+          <div class="nt">固件加载</div>
+          <div class="ns">GFX/SDMA/VCN ucode</div>
+        </div>
+        <div class="mm-l2 teal" onclick="showDetail('l2f2')">
+          <div class="nt">PSP 安全处理器</div>
+          <div class="ns">TEE / TMR / HDCP</div>
+        </div>
+      </div>
+
+      <div class="mm-l2-row cols2">
+        <div class="mm-l2 teal" onclick="showDetail('l2f3')">
+          <div class="nt">RAS ECC 检测</div>
+          <div class="ns">UE/CE 错误上报</div>
+        </div>
+        <div class="mm-l2 amber" onclick="showDetail('l2f4')">
+          <div class="nt">⚠ RAS 错误恢复</div>
+          <div class="ns">页退役 / GPU reset</div>
+        </div>
+      </div>
+
+      <div class="mm-l3-row cols2">
+        <div class="mm-l3 teal" onclick="showDetail('l3f1')">
+          <div class="nt">VCN 视频编解码</div>
+          <div class="ns">H.264/HEVC/AV1</div>
+        </div>
+        <div class="mm-l3 teal" onclick="showDetail('l3f2')">
+          <div class="nt">EEPROM 坏页表</div>
+          <div class="ns">持久化退役页记录</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- mm-cols -->
+
+  <!-- DETAIL PANEL -->
+  <div class="mm-detail" id="mm-detail">
+    <button class="mm-detail-close" onclick="closeDetail()">✕</button>
+    <div class="mm-detail-title" id="mm-detail-title"></div>
+    <div class="mm-detail-sub"   id="mm-detail-sub"></div>
+    <div class="mm-detail-body"  id="mm-detail-body"></div>
+  </div>
+
+  <div class="mm-tagline">amdgpu · Linux DRM/KMS · drivers/gpu/drm/amd/ · 点击节点查看详情</div>
+
+</div><!-- mm-wrap -->
+
+<footer>
+  <span>amdgpu 功能脑图</span>
+  <span>生成于 Claude · 可自由分发</span>
+</footer>
+
+<script>
+const DETAIL = {
+  root: {
+    title: 'amdgpu',
+    sub:   'AMD GPU kernel driver — GFX / display / power / RAS',
+    body:  'amdgpu 是 Linux 内核中 AMD 独立显卡与 APU 的主驱动，位于 <code>drivers/gpu/drm/amd/</code>。<br><br>它基于 DRM/KMS 框架实现，并向上暴露 <code>libdrm</code> / Mesa / ROCm 所需的用户态接口。内部按功能分为六大职责域：设备生命周期、命令调度、内存管理、显示、电源、固件与 RAS。<br><br>支持从 GCN 1.0 (Sea Islands) 到 RDNA 3+ (Navi 3x) 的所有近代 AMD GPU，以及 Ryzen APU 的集成显卡。'
+  },
+
+  // ── A: 设备初始化与生命周期 ──
+  l1a: {
+    title: '设备初始化与生命周期',
+    sub:   'PCI probe → IP block init → reset → suspend/resume',
+    body:  '驱动通过 <code>amdgpu_pci_probe()</code> 入口绑定设备，依次调用 <code>amdgpu_device_init()</code> 完成 VBIOS 读取、MMIO 映射、IP block 发现与逐块 hw_init。<br><br>每个 IP block（GFX、SDMA、VCE/VCN、SOC15…）实现统一的 <code>amdgpu_ip_block_version</code> 接口，驱动按拓扑顺序逐一调用。<br><br>GPU reset 路径分 soft（仅 ring 重置）与 hard（完整 ASIC 复位），由 <code>amdgpu_device_gpu_recover()</code> 协调；suspend/resume 负责保存/恢复 register state 和重新提交 firmware。'
+  },
+  l2a1: {
+    title: 'PCI Probe',
+    sub:   'pci_driver.probe → amdgpu_pci_probe()',
+    body:  '<code>amdgpu_pci_probe()</code> 通过 PCI device ID 表匹配设备，分配 <code>amdgpu_device</code> 结构体，映射 BAR0（MMIO）和 BAR5（VRAM aperture），随后调用主初始化序列。<br><br>支持 SR-IOV VF 模式，此时走不同的初始化路径 (<code>amdgpu_virt_init()</code>)。'
+  },
+  l2a2: {
+    title: 'IP Block 枚举',
+    sub:   'SOC 子功能模块的发现与排序初始化',
+    body:  '每一代 ASIC 通过 <code>amdgpu_device_ip_block_add()</code> 注册其 IP block 列表（例如 <code>nv_common_ip_block</code>、<code>gfx_v10_0_ip_block</code>）。<br><br>初始化阶段按顺序调用每个 block 的 <code>hw_init</code>，关闭时逆序调用 <code>hw_fini</code>，保证依赖关系正确。'
+  },
+  l2a3: {
+    title: 'GPU Reset',
+    sub:   'soft reset / hard reset / full ASIC recovery',
+    body:  'GPU 挂起时（job 超时、MEC hang 等）进入 <code>amdgpu_device_gpu_recover()</code>。<br><br>依次尝试：① ring soft reset；② per-IP hw_reset；③ 完整 ASIC hard reset（需要通知 scheduler 停止提交）。<br><br>reset 完成后重新加载 firmware，恢复 VM 页表，唤醒等待 fence 的进程。'
+  },
+  l2a4: {
+    title: 'Suspend / Resume',
+    sub:   'S3 (suspend-to-RAM) / S4 (hibernate)',
+    body:  '<code>amdgpu_pmops_suspend()</code> 依次调用各 IP block 的 <code>suspend</code>，保存关键寄存器状态，关闭时钟门控。<br><br>Resume 路径重新执行 firmware 加载、ring 初始化、显示 mode 恢复，对 APU 还需与 SMU 协商电源域。'
+  },
+  l3a1: {
+    title: 'amdgpu_device_init()',
+    sub:   '主初始化序列入口',
+    body:  '该函数是整个驱动启动的主干：VBIOS 读取 → MMIO 映射 → IP block 注册 → <code>amdgpu_device_ip_init()</code> → ring/IB/fence 初始化 → KMS 注册。<br><br>失败时沿逆序执行 fini 序列确保资源不泄露。'
+  },
+  l3a2: {
+    title: 'ASIC funcs 表',
+    sub:   'per-generation 函数指针派发',
+    body:  '<code>amdgpu_asic_funcs</code> 结构体为每一代 ASIC（SI/CIK/VI/SOC15/NV…）提供 read_register、reset、set_vga_state 等操作的具体实现，驱动核心通过函数指针调用，实现跨代码隔离。'
+  },
+
+  // ── B: 命令提交与调度 ──
+  l1b: {
+    title: '命令提交与调度',
+    sub:   'CS ioctl → ring buffer → drm_gpu_scheduler',
+    body:  '用户态（Mesa/ROCm）通过 <code>DRM_IOCTL_AMDGPU_CS</code> 提交命令流，驱动校验 BO 列表、构建 IB、写入 ring，最后由 <code>drm_gpu_scheduler</code> 完成跨进程公平调度。<br><br>fence 机制保证命令完成的可等待性；job 超时触发 GPU reset 路径。'
+  },
+  l2b1: {
+    title: 'Ring Buffer',
+    sub:   'GFX / SDMA / Compute / VCN ring',
+    body:  'Ring buffer 是 CPU 写、GPU 读的环形队列，通过 WPTR（write pointer）推进、RPTR（read pointer）反馈。<br><br>每类引擎有独立 ring：<code>amdgpu_ring_gfx</code>、<code>amdgpu_ring_sdma</code>、<code>amdgpu_ring_compute</code> 等。写入方法通过 <code>ring->funcs->emit_*</code> 抽象。'
+  },
+  l2b2: {
+    title: 'Indirect Buffer (IB)',
+    sub:   'PM4 packet 的二级命令缓冲区',
+    body:  'IB 是真正承载 GPU 命令的内存缓冲区，ring 中只写一条 <code>INDIRECT_BUFFER</code> PM4 包指向它。<br><br>驱动在 <code>amdgpu_ib_schedule()</code> 中绑定 VM 上下文、填写 IB 基址/大小，再通过 ring emit 函数提交。'
+  },
+  l2b3: {
+    title: 'GPU Scheduler',
+    sub:   'drm_gpu_scheduler — 多队列 / 优先级 / 抢占',
+    body:  'amdgpu 使用内核通用的 <code>drm_gpu_scheduler</code>（<code>drivers/gpu/drm/scheduler/</code>）。<br><br>每个 ring 对应一个 scheduler，支持 NORMAL / HIGH_KERNEL / HIGH_HW 优先级队列。job 由 <code>amdgpu_job</code> 封装，通过 <code>entity</code> 排队，scheduler 线程拉取并提交到 ring。'
+  },
+  l3b1: {
+    title: 'fence / sync',
+    sub:   'dma_fence 信号与 implicit/explicit sync',
+    body:  '每个 IB 提交关联一个 <code>dma_fence</code>，GPU 完成时由 irq handler 调用 <code>amdgpu_fence_process()</code> 发出信号。<br><br>支持 explicit sync（<code>DMA_BUF_SYNC_*</code>）和 implicit sync（通过 bo 的 reservation object）两种同步模式。'
+  },
+  l3b2: {
+    title: 'job 超时 & watchdog',
+    sub:   'scheduler timeout → GPU reset',
+    body:  'scheduler 为每个 job 设置定时器（默认 10s），超时触发 <code>amdgpu_job_timedout()</code>，进而调用 GPU reset 序列，并向用户态返回 <code>-ECANCELED</code>。'
+  },
+  l3b3: {
+    title: 'MES (Micro-Engine Scheduler)',
+    sub:   'GFX11+ 硬件调度器',
+    body:  'RDNA 3 起引入 MES firmware，将队列调度从 CPU KMD 卸载到 GPU 微控制器。驱动通过 <code>amdgpu_mes_add_hw_queue()</code> 向 MES 注册队列，减少 CPU 介入开销，提升多进程并发性能。'
+  },
+
+  // ── C: 内存管理 ──
+  l1c: {
+    title: '内存管理',
+    sub:   'BO 生命周期 / GPU 虚拟地址 / TTM',
+    body:  'amdgpu 内存管理以 <code>amdgpu_bo</code>（buffer object）为核心，基于 TTM（Translation Table Manager）框架管理 VRAM、GTT（GART 映射的系统内存）和 CPU 可见 VRAM 三种内存域。<br><br>每个进程上下文拥有独立的 GPU 虚拟地址空间（VM），由驱动维护多级页表。'
+  },
+  l2c1: {
+    title: 'BO 分配',
+    sub:   'VRAM / GTT / CPU-visible 域选择',
+    body:  '<code>amdgpu_bo_create()</code> 根据调用者偏好（flags）在 VRAM、GTT 或 CPU 可见 VRAM 中分配。底层通过 TTM 的 <code>ttm_bo_init()</code> 完成，支持 pin（锁定在特定域）操作。'
+  },
+  l2c2: {
+    title: 'BO 迁移',
+    sub:   'eviction / swap-in / placement 决策',
+    body:  '内存压力时 TTM 调用 <code>amdgpu_bo_move()</code> 将 BO 从 VRAM 迁移到 GTT 或系统内存（eviction）。迁移通过 SDMA DMA 引擎完成，保证内容不丢失。再次使用时触发 swap-in。'
+  },
+  l2c3: {
+    title: 'GPU 虚拟地址 / 页表',
+    sub:   'VM 管理 + 多级页表更新',
+    body:  '每个 <code>amdgpu_vm</code> 维护一棵多级页表树（PD/PT），通过 SDMA 或 GFX 的 <code>UPDATE_PTEs</code> packet 更新。支持大页（2MB/1GB）以减少 TLB miss。<br><br>VM fault 由 GPU 的 VM L1/L2 TLB 硬件上报，驱动在 irq handler 中处理。'
+  },
+  l2c4: {
+    title: 'MMU Notifier',
+    sub:   'CPU 侧 munmap → GPU TLB invalidate',
+    body:  '注册 <code>mmu_interval_notifier</code>，当用户态 unmap/fork 导致 CPU 页表变更时，通知 amdgpu 对相应 GPU 虚拟地址执行 TLB invalidate，防止 GPU 访问已释放的物理页。'
+  },
+  l3c1: {
+    title: 'TTM 集成',
+    sub:   'ttm_bo_driver / placement 抽象',
+    body:  'amdgpu 实现 <code>ttm_bo_driver</code> 接口（<code>move</code>、<code>io_mem_reserve</code>、<code>evict_flags</code>），将 TTM 的通用 BO 管理与 AMD 硬件特性对接。TTM 负责 LRU 淘汰决策，amdgpu 负责实际数据搬移。'
+  },
+  l3c2: {
+    title: 'XGMI / hive 统一地址',
+    sub:   '多 GPU 统一内存访问',
+    body:  'XGMI（CrossGfxMemory Interconnect）将多颗 GPU 的 VRAM 合并为统一地址空间。驱动通过 <code>amdgpu_xgmi_add_device()</code> 将设备加入 hive，配置跨 GPU 的 PeerDirect 映射，支持无需 CPU 中转的 GPU-to-GPU DMA。'
+  },
+
+  // ── D: 显示子系统 ──
+  l1d: {
+    title: '显示子系统 (DC)',
+    sub:   'Display Core — atomic modesetting / overlay / 色彩',
+    body:  'amdgpu 的显示子系统称为 DC（Display Core），位于 <code>drivers/gpu/drm/amd/display/</code>。它在 DRM KMS atomic 框架之上封装了 AMD 特有的显示硬件抽象层（DAL），支持 DCN（Display Core Next）硬件。<br><br>DC 负责 mode validation、plane 合成、色彩管道配置和 DP/HDMI link training。'
+  },
+  l2d1: {
+    title: 'Atomic Commit',
+    sub:   'drm_atomic_state → DC 硬件更新',
+    body:  'DRM atomic commit 流程：<code>dm_atomic_check()</code> 校验带宽/时序约束，<code>dm_atomic_commit_tail()</code> 将 DRM state 转换为 DC <code>dc_state</code> 并调用 <code>dc_commit_state()</code> 更新硬件寄存器。支持 non-blocking commit，避免 vblank stall。'
+  },
+  l2d2: {
+    title: 'Overlay Planes (MPO)',
+    sub:   'Multi-Plane Overlay — 硬件合成减少 GPU 负载',
+    body:  'MPO 允许多个显示平面（cursor、overlay、primary）由显示硬件直接合成，无需 GPU 3D 合成。驱动在 <code>dm_plane_helper_check_state()</code> 中验证 plane 格式/缩放能力，并配置 DPP（Display Pipe and Plane）硬件。'
+  },
+  l2d3: {
+    title: '色彩管理',
+    sub:   'HDR / 3D LUT / 色域转换',
+    body:  'DC 的色彩管道支持每 plane 的 pre-blend degamma、3D LUT、矩阵变换（色域转换）和 post-blend regamma。通过 DRM 色彩管理属性（<code>DEGAMMA_LUT</code>、<code>CTM</code>、<code>GAMMA_LUT</code>）暴露给用户态，支持 HDR10 输出。'
+  },
+  l2d4: {
+    title: '音频输出',
+    sub:   'HDMI / DP audio endpoint',
+    body:  'amdgpu 实现 ALSA HDA codec 接口，将 GPU 音频输出端点注册为 HDMI/DP audio 设备。DC 负责在 link training 完成后使能音频通道，并通过 <code>amdgpu_dm_audio_*</code> 函数与 ALSA 层交互。'
+  },
+  l3d1: {
+    title: 'DCN HW 抽象',
+    sub:   'DCN 1.x / 2.x / 3.x 硬件差异屏蔽',
+    body:  'DC 通过 <code>dc_hw_sequencer</code> 函数表为每代 DCN 硬件提供不同实现（<code>dcn10_hw_sequencer</code>、<code>dcn20_*</code>…），上层逻辑无需感知寄存器差异。DCN 3.2 起支持 subvp（sub-viewport）技术降低 mem BW。'
+  },
+  l3d2: {
+    title: 'PSR / ABM',
+    sub:   '面板自刷新 & 自适应亮度调节',
+    body:  'PSR（Panel Self Refresh）让 eDP 面板在静态画面时自主刷新，无需 GPU 持续输出，节省功耗。ABM（Adaptive Backlight Management）根据内容动态调整背光亮度。两者均由 DC 与 DMU firmware 协作实现。'
+  },
+
+  // ── E: 电源管理 ──
+  l1e: {
+    title: '电源管理',
+    sub:   'powerplay / SMU / BACO / thermal',
+    body:  'amdgpu 的 GPU 电源管理（PP，powerplay）通过 SMU（System Management Unit）firmware 实现频率/电压调节、热保护和深度省电（BACO）。<br><br>驱动与 SMU 通过共享内存消息接口通信，暴露 hwmon sysfs 节点供用户态监控和手动 OC/UV。'
+  },
+  l2e1: {
+    title: '频率/电压调节',
+    sub:   'DPM P-state 表 / GFXCLK / MCLK',
+    body:  'SMU 维护 P-state 表（对应不同负载的 {频率, 电压} 组合），驱动通过 <code>smu_send_smc_msg()</code> 请求目标 P-state。<br><br>用户可通过 <code>pp_od_clk_voltage</code> sysfs 节点手动设置频率/电压上下限（OD feature）。'
+  },
+  l2e2: {
+    title: 'Thermal 管理',
+    sub:   '温度监控 / 降频 / 风扇控制',
+    body:  'SMU 内嵌 thermal controller，当 junction 温度超过 Tjmax 时自动降频（throttle）。驱动读取 SMU 上报的温度数据，通过 hwmon 暴露 <code>temp1_input</code>。风扇 PWM 控制也由 SMU 负责，驱动可查询/设置目标转速。'
+  },
+  l2e3: {
+    title: 'BACO / BOCO',
+    sub:   'Bus Active Clock Off — 深度省电',
+    body:  'BACO（Bus Active, Clock Off）是 AMD GPU 最深的运行时省电状态，关闭几乎所有时钟并断开 PCIe 总线信号链路。<br><br><code>amdgpu_device_baco_enter/exit()</code> 协调 IP block 的安全进入/退出，常用于桌面待机场景下 dGPU 的功耗控制。'
+  },
+  l2e4: {
+    title: '功耗上限',
+    sub:   'TDP / TGP capping — PPT',
+    body:  'SMU 通过 PPT（Package Power Tracking）机制限制 GPU 总功耗（TGP）。驱动通过 <code>amdgpu_hwmon_set_power_cap()</code> 向 SMU 发送功耗上限命令，支持 <code>power1_cap</code> hwmon 接口。'
+  },
+  l3e1: {
+    title: 'SMU 消息接口',
+    sub:   'host KMD → SMU firmware 命令通道',
+    body:  'KMD 与 SMU 之间通过 MMIO 寄存器（message register + argument register + response register）传递命令。<code>smu_send_smc_msg_with_param()</code> 是统一入口，每代 SMU 有自己的消息 ID 映射表。'
+  },
+  l3e2: {
+    title: 'hwmon sysfs',
+    sub:   '温度/频率/功耗节点暴露',
+    body:  'amdgpu 注册 hwmon 设备，暴露 <code>temp*</code>（结温/热点/显存温度）、<code>freq*</code>（当前/最大频率）、<code>power*</code>（功耗/上限）、<code>fan*</code>（转速/PWM）等 sysfs 节点，供 <code>sensors</code>、<code>radeontop</code> 等工具使用。'
+  },
+
+  // ── F: 固件与 RAS ──
+  l1f: {
+    title: '固件与 RAS',
+    sub:   'PSP / VCN / SDMA firmware + ECC 可靠性',
+    body:  'amdgpu 在初始化阶段通过 <code>request_firmware()</code> 加载各 IP block 的 ucode，由 PSP（Platform Security Processor）安全验证后写入 GPU SRAM。<br><br>RAS（Reliability, Availability, Serviceability）子系统负责 ECC 错误的检测、计数、上报和恢复，并通过 EEPROM 持久化坏页记录。'
+  },
+  l2f1: {
+    title: '固件加载',
+    sub:   'GFX / SDMA / VCN / DMCU ucode 加载',
+    body:  '<code>amdgpu_ucode_request()</code> 从文件系统加载 .bin 固件，解析 firmware header 获取各 ucode segment 的 GPU 地址和大小，通过 PSP <code>psp_load_fw_list()</code> 或直接 MMIO 写入加载到 GPU 内部 SRAM。'
+  },
+  l2f2: {
+    title: 'PSP 安全处理器',
+    sub:   'TEE / TMR 内存保护 / HDCP',
+    body:  'PSP 是独立的安全 ARM Cortex-A5 核，运行可信固件（TEE）。驱动通过 ring buffer 向 PSP 提交命令（<code>psp_cmd_submit_buf()</code>），用途包括：固件签名验证、TMR（Trusted Memory Region）划分、HDCP 会话管理、TA（Trusted Application）加载。'
+  },
+  l2f3: {
+    title: 'RAS ECC 检测',
+    sub:   'UE / CE 错误检测与计数',
+    body:  'RAS 子系统为每个支持 ECC 的 IP block（GFX、SDMA、UMC、XGMI…）注册错误处理器。UE（Uncorrectable Error）触发 GPU reset；CE（Correctable Error）计数并通过 <code>ras/xxx/ue_count</code> sysfs 暴露。<br><br>错误事件同时通过 <code>ras_manager</code> 发送到 kernel log 和 IPMI BMC（通过 APEI/CPER 或 vendor-specific 通道）。'
+  },
+  l2f4: {
+    title: '⚠ RAS 错误恢复',
+    sub:   '坏页退役 / GPU reset / EEPROM 持久化',
+    body:  '检测到 UE 的物理页会被加入退役列表（bad page retirement），驱动通过 <code>amdgpu_umc_page_retirement()</code> 将其从可分配空间中移除，并写入板载 EEPROM 以在重启后保持退役状态。<br><br>退役页数量超阈值时，驱动上报 RAS fatal error，触发设备下线。'
+  },
+  l3f1: {
+    title: 'VCN 视频编解码',
+    sub:   'H.264 / HEVC / AV1 硬件加速',
+    body:  'VCN（Video Core Next）是 AMD GPU 的视频编解码引擎，从 Vega 开始集成。amdgpu 为 VCN 分配专用 ring，用户态通过 Mesa VA-API / VDPAU 或 AMF 库提交视频编解码任务。驱动负责 VCN firmware 加载、ring 初始化和电源门控。'
+  },
+  l3f2: {
+    title: 'EEPROM 坏页表',
+    sub:   '持久化退役物理页记录',
+    body:  'amdgpu 使用显卡板载的 I2C EEPROM 存储坏页地址列表（<code>amdgpu_ras_eeprom_*</code>）。每次初始化时读取并标记，避免将故障物理页分配给 BO，实现跨重启的可靠性保障。'
+  },
+};
+
+function showDetail(key) {
+  const d = DETAIL[key];
+  if (!d) return;
+  document.getElementById('mm-detail-title').textContent = d.title;
+  document.getElementById('mm-detail-sub').textContent   = d.sub;
+  document.getElementById('mm-detail-body').innerHTML    = d.body;
+  const el = document.getElementById('mm-detail');
+  el.classList.add('show');
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeDetail() {
+  document.getElementById('mm-detail').classList.remove('show');
+}
+</script>
+</body>
+</html>
