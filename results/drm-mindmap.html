@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux DRM 功能脑图</title>
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.16"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { background:#0e0f11; color:#e8e6e0; font-family:'JetBrains Mono','Fira Code',monospace; }
+
+header {
+  padding:16px 32px;
+  border-bottom:1px solid rgba(255,255,255,0.07);
+  display:flex; align-items:baseline; gap:12px;
+}
+header h1 { font-size:13px; font-weight:500; color:#9c9a92; letter-spacing:.04em; }
+header span { font-size:11px; color:#5f5e5a; }
+
+/* 脑图区 */
+#map-wrap { width:100%; height:60vh; }
+.markmap { width:100%; height:100%; }
+
+/* 表格区 */
+#table-wrap {
+  padding:24px 32px 48px;
+  border-top:1px solid rgba(255,255,255,0.07);
+}
+#table-wrap h2 {
+  font-size:11px; font-weight:500; color:#5f5e5a;
+  letter-spacing:.08em; text-transform:uppercase;
+  margin-bottom:16px;
+}
+table {
+  width:100%; border-collapse:collapse; font-size:12px;
+}
+thead tr {
+  border-bottom:1px solid rgba(255,255,255,0.1);
+}
+thead th {
+  text-align:left; padding:8px 12px;
+  font-size:10px; font-weight:500; letter-spacing:.06em;
+  text-transform:uppercase; color:#5f5e5a;
+}
+tbody tr {
+  border-bottom:1px solid rgba(255,255,255,0.04);
+  transition:background .1s;
+}
+tbody tr:hover { background:rgba(255,255,255,0.03); }
+td { padding:10px 12px; vertical-align:top; line-height:1.6; }
+
+.td-name {
+  white-space:nowrap;
+  font-weight:600; font-size:12px;
+}
+.td-en { font-size:10px; color:#5f5e5a; margin-top:2px; }
+.td-desc { color:#9c9a92; font-size:12px; }
+.td-key { color:#b4b2a9; font-size:11px; }
+.td-src { color:#5f5e5a; font-size:10px; font-family:monospace; }
+
+/* 色点 */
+.dot {
+  display:inline-block; width:8px; height:8px;
+  border-radius:50%; margin-right:8px; flex-shrink:0;
+  vertical-align:middle; margin-top:-1px;
+}
+.c1 { background:#afa9ec; }
+.c2 { background:#5dcaa5; }
+.c3 { background:#f0997b; }
+.c4 { background:#ef9f27; }
+.c5 { background:#85b7eb; }
+.c6 { background:#ed93b1; }
+.c7 { background:#97c459; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Linux DRM · Direct Rendering Manager</h1>
+  <span>drivers/gpu/drm/ · 功能全景</span>
+</header>
+
+<!-- 脑图 -->
+<div id="map-wrap">
+<div class="markmap">
+<script type="text/template">
+---
+markmap:
+  colorFreezeLevel: 2
+  backgroundColor: "#0e0f11"
+  color: ["#afa9ec","#5dcaa5","#f0997b","#ef9f27","#85b7eb","#ed93b1","#97c459"]
+  initialExpandLevel: 2
+  fontFamily: "'JetBrains Mono',monospace"
+  fontSize: 13
+  spacingVertical: 6
+  spacingHorizontal: 60
+---
+
+# Linux DRM
+
+## 设备生命周期
+### 注册/注销 · drm_device
+### 文件操作 · drm_file · ioctl
+### 鉴权隔离 · Master · Lease
+### 事件通知 · 热插拔 · vblank
+
+## KMS 模式设置
+### 对象模型 · CRTC · Plane · Encoder · Connector · Bridge
+### Atomic 状态机 · check · commit
+### 属性系统 · blob · enum · range
+### 混合层 · zpos · alpha
+
+## 显示管线辅助
+### EDID 解析 · 分辨率 · 色彩
+### DisplayPort · AUX · MST · DSC
+### HDMI · HDCP · CEC · InfoFrame
+### MIPI · DSI · DBI
+### 色彩管理 · gamma · CTM · HDR
+
+## 内存管理
+### GEM 核心 · handle · mmap · pages
+### GEM 类型 · DMA/CMA · SHMEM · VRAM
+### TTM · VRAM↔GTT 迁移 · eviction
+### GPU 虚拟内存 · GPUVM · GPUSVM
+### PRIME · dma-buf 跨设备共享
+
+## 同步原语
+### dma-fence · signal · wait · chain
+### syncobj · timeline · Vulkan 模型
+### vblank · 帧序列号 · fence
+### GPU Scheduler · Entity · Job · Reset
+
+## Framebuffer 管理
+### 创建销毁 · AddFB2 · RmFB
+### 格式 · fourcc · modifier · AFBC/CCS
+### mmap · Dumb Buffer
+
+## 辅助设施
+### debugfs · CRC · trace
+### fbdev 模拟 · DRM Panic 崩溃屏
+### RAS 错误上报 · drm_mm · IGT
+</script>
+</div>
+</div>
+
+<!-- 详情表格 -->
+<div id="table-wrap">
+  <h2>一级功能说明</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:160px">功能域</th>
+        <th style="width:40%">核心职责</th>
+        <th>关键接口 / 数据结构</th>
+        <th style="width:160px">源码位置</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="td-name"><span class="dot c1"></span>设备生命周期<div class="td-en">Device Lifecycle</div></td>
+        <td class="td-desc">管理 drm_device 从注册到销毁的全过程；每个 open() 创建独立的 drm_file 上下文；通过 DRM-Master 实现单进程独占显示控制，DRM-Lease 将输出资源细粒度租给子进程</td>
+        <td class="td-key">drm_device · drm_file · drm_driver<br>drm_master · drm_lease<br>DRM_IOCTL_SET_MASTER</td>
+        <td class="td-src">drm_drv.c<br>drm_file.c<br>drm_auth.c<br>drm_lease.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c2"></span>KMS 模式设置<div class="td-en">Kernel Mode Setting</div></td>
+        <td class="td-desc">将显示管线抽象为 CRTC / Plane / Encoder / Connector / Bridge 正交对象；Atomic Commit 一次事务性切换多个对象状态，全成功或全回滚，消灭撕裂帧；属性系统允许驱动扩展任意显示参数</td>
+        <td class="td-key">drm_crtc · drm_plane · drm_encoder<br>drm_connector · drm_bridge<br>drm_atomic_state · drm_atomic_commit()</td>
+        <td class="td-src">drm_crtc.c<br>drm_atomic.c<br>drm_atomic_helper.c<br>drm_bridge.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c3"></span>显示管线辅助<div class="td-en">Display Pipeline</div></td>
+        <td class="td-desc">提供 EDID 解析（读取显示器能力表）、DisplayPort AUX/MST/DSC、HDMI HDCP/CEC、MIPI DSI/DBI 协议栈，以及 gamma / CTM / HDR 色彩管理——驱动复用这些库，无需重复实现协议细节</td>
+        <td class="td-key">drm_edid_read() · drm_dp_aux<br>drm_dp_mst_topology · drm_hdcp<br>drm_color_lut · drm_color_ctm</td>
+        <td class="td-src">drm_edid.c<br>dp/ · hdmi/<br>mipi_dsi.c<br>drm_color_mgmt.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c4"></span>内存管理<div class="td-en">Memory Management</div></td>
+        <td class="td-desc">GEM 统一管理 Buffer Object 生命周期（引用计数 / mmap / fence）；按硬件能力选择后端：DMA/CMA 用于无 IOMMU 小 GPU，SHMEM 用于集成 GPU，VRAM+TTM 用于独显（含迁移驱逐）；GPUVM 管理 GPU 独立页表；PRIME 通过 dma-buf fd 实现跨驱动零拷贝共享</td>
+        <td class="td-key">drm_gem_object · dma_resv<br>ttm_buffer_object · ttm_resource<br>drm_gpuva_manager · drm_prime_*</td>
+        <td class="td-src">drm_gem.c<br>drm_gem_shmem.c<br>ttm/ · drm_prime.c<br>drm_gpuvm.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c5"></span>同步原语<div class="td-en">Synchronization</div></td>
+        <td class="td-desc">dma-fence 是 GPU 异步操作完成的 one-shot 信号量，signal 在中断上下文触发，wait 可跨驱动阻塞；syncobj 实现 Vulkan timeline semaphore 语义，支持用户态直接操作；drm_sched 提供 per-entity 调度队列和超时 GPU Reset 机制</td>
+        <td class="td-key">dma_fence · dma_fence_chain<br>drm_syncobj · drm_gpu_scheduler<br>drm_sched_job · drm_sched_entity</td>
+        <td class="td-src">dma-fence.c<br>drm_syncobj.c<br>scheduler/<br>drm_vblank.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c6"></span>Framebuffer 管理<div class="td-en">Framebuffer</div></td>
+        <td class="td-desc">drm_framebuffer 是 GEM BO 的显示视图，携带像素格式（DRM fourcc）和 tiling 布局（format modifier：LINEAR / AFBC / CCS）；Dumb Buffer 提供无需驱动扩展的简化分配接口；AddFB2 将 BO 注册为可扫描缓冲区</td>
+        <td class="td-key">drm_framebuffer · drm_format_info<br>DRM_FORMAT_* · DRM_FORMAT_MOD_*<br>DRM_IOCTL_MODE_ADDFB2</td>
+        <td class="td-src">drm_framebuffer.c<br>drm_fourcc.c<br>drm_dumb_buffers.c</td>
+      </tr>
+      <tr>
+        <td class="td-name"><span class="dot c7"></span>辅助设施<div class="td-en">Utilities</div></td>
+        <td class="td-desc">debugfs 导出 KMS 状态 / framebuffer 列表 / drm_mm 地址段；CRC 用于显示输出的像素级回归测试；fbdev 兼容层向下支持传统终端；DRM Panic 在内核崩溃时将 backtrace 渲染到屏幕；RAS 通过 netlink 上报 GPU 硬件错误</td>
+        <td class="td-key">drm_debugfs · drm_crtc_crc<br>drm_fbdev_generic · drm_panic<br>drm_mm · drm_draw · IGT</td>
+        <td class="td-src">drm_debugfs.c<br>drm_panic.c<br>drm_mm.c<br>drm_fbdev_generic.c</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>
