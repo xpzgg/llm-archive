@@ -67,7 +67,7 @@ list_del_rcu(&old_obj->list);
 
 ### rcu_assign_pointer()
 
-The updater uses this function to assign a new value to an RCU-protected pointer, in order to safely communicate the change in value from the updater to the reader. This macro does not evaluate to an rvalue, but it does execute any memory-barrier instructions required for a given CPU architecture.
+updater 用来给 RCU 保护的指针赋新值，把更新安全地发布给 reader。这个宏不能当右值用，但会在必要的架构上插入内存屏障。
 
 **Barrier 的作用**：`rcu_assign_pointer` 内部插入了 write barrier（`smp_store_release` 语义），保证先完成新结构体所有字段的初始化，再让指针指向新结构体。如果没有 barrier，CPU 或编译器可能重排序，导致 reader 通过新指针看到未初始化的字段。
 
@@ -75,11 +75,11 @@ The updater uses this function to assign a new value to an RCU-protected pointer
 
 ### rcu_dereference()
 
-The reader uses [`rcu_dereference()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.rcu_dereference) to fetch an RCU-protected pointer, which returns a value that may then be safely dereferenced.
+reader 用来拿 RCU 保护的指针，拿到后可以安全解引用。
 
-Note that [`rcu_dereference()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.rcu_dereference) does not actually dereference the pointer, instead, it protects the pointer for later dereferencing. // 实际上只是拿了指针当前版本的值，没有解引用
+注意 [`rcu_dereference()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.rcu_dereference) 本身不解引用，只是把指针当前版本的值取出来。
 
-If you are going to be fetching multiple fields from the RCU-protected structure, using the local variable is of course preferred. Repeated [`rcu_dereference()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.rcu_dereference) calls look ugly, do not guarantee that the same pointer will be returned if an update happened while in the critical section, and incur unnecessary overhead on Alpha CPUs.
+如果要读结构体的多个字段，建议用局部变量存一下指针。反复调 [`rcu_dereference()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.rcu_dereference) 不好看，而且临界区内如果发生了更新，每次不一定返回同一个指针，Alpha CPU 上还会有额外开销。
 
 ## reclaimer
 
@@ -87,7 +87,7 @@ If you are going to be fetching multiple fields from the RCU-protected structure
 
 ### synchronize_rcu()
 
-Marks the end of updater code and the beginning of reclaimer code。It does this by blocking until all pre-existing RCU read-side critical sections on all CPUs have completed。保证在这之前的rcu 临界区都已退出 Note that [`synchronize_rcu()`](https://www.kernel.org/doc/html/v5.10//core-api/kernel-api.html#c.synchronize_rcu) will **not** necessarily wait for any subsequent RCU read-side critical sections to complete.
+updater 代码和 reclaimer 代码的分界线。会阻塞等待所有 CPU 上已存在的 RCU 临界区都退出。注意只等调用前已存在的临界区，之后新进入的不等。
 
 ```
         CPU 0                  CPU 1                 CPU 2
