@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fetch CVE descriptions from Debian security tracker."""
-import re, sys, time
+import argparse, re, sys, time
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -47,7 +47,25 @@ def fetch_one(cve_id: str, retries: int = 5) -> tuple[str, str]:
 
 
 def main():
-    input_file = sys.argv[1] if len(sys.argv) > 1 else "cve.txt"
+    parser = argparse.ArgumentParser(
+        description="Fetch CVE patch descriptions from Debian security tracker.\n"
+                    "Reads CVE IDs from an input file, queries security-tracker.debian.org,\n"
+                    "and overwrites the file with tab-separated results:\n"
+                    "  CVE_ID<TAB>module<TAB>description",
+        epilog="example:\n"
+               "  %(prog)s cve.txt\n"
+               "  %(prog)s          # defaults to cve.txt",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "input_file", nargs="?", default="cve.txt",
+        help="input file containing one CVE ID per line "
+             "(default: cve.txt). The file is overwritten in-place "
+             "with fetched results.",
+    )
+    args = parser.parse_args()
+
+    input_file = args.input_file
     with open(input_file) as f:
         lines = [l.rstrip("\n") for l in f if l.strip()]
 
