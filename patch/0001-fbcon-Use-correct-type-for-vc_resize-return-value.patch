@@ -1,0 +1,33 @@
+From a8e82dc391e0773f7db76386995069b8195803a6 Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Wed, 13 May 2026 11:08:47 +0800
+Subject: [PATCH] fbcon: Use correct type for vc_resize() return value
+
+The return value of vc_resize() is int, but fbcon_set_disp() stores it
+in an unsigned long variable. While the !ret check happens to work
+correctly by coincidence (negative values become large positive values),
+the types should match. Use int instead.
+
+Fixes: af0db3c1f898 ("fbdev: Fix vmalloc out-of-bounds write in fast_imageblit")
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ drivers/video/fbdev/core/fbcon.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/video/fbdev/core/fbcon.c b/drivers/video/fbdev/core/fbcon.c
+index b0e3e765360d..641687a734d5 100644
+--- a/drivers/video/fbdev/core/fbcon.c
++++ b/drivers/video/fbdev/core/fbcon.c
+@@ -1440,8 +1440,7 @@ static void fbcon_set_disp(struct fb_info *info, struct fb_var_screeninfo *var,
+ 	struct vc_data **default_mode, *vc;
+ 	struct vc_data *svc;
+ 	struct fbcon_par *par = info->fbcon_par;
+-	int rows, cols;
+-	unsigned long ret = 0;
++	int rows, cols, ret;
+ 
+ 	p = &fb_display[unit];
+ 
+-- 
+2.34.1
+

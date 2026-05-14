@@ -1,0 +1,50 @@
+1	CVE-2026-31785	drm/xe/xe_pagefault: Disallow writes to read-only VMAs
+2	CVE-2026-31784	drm/xe/pxp: Clear restart flag in pxp_start after jumping back
+3	CVE-2026-31781	drm/ioc32: stop speculation on the drm_compat_ioctl path
+4	CVE-2026-31766	drm/amdgpu: validate doorbell_offset in user queue creation
+5	CVE-2026-31767	drm/i915/dsi: Don't do DSC horizontal timing adjustments in command mode
+6	CVE-2026-31765	drm/amdgpu: Change AMDGPU_VA_RESERVED_TRAP_SIZE to 64KB
+7	CVE-2026-43072	drm/vc4: platform_get_irq_byname() returns an int
+8	CVE-2025-71294	drm/amdgpu: fix NULL pointer issue buffer funcs
+9	CVE-2025-71293	drm/amdgpu/ras: Move ras data alloc before bad page check
+10	CVE-2026-43280	drm/xe: Add bounds check on pat_index to prevent OOB kernel read in madvise
+11	CVE-2026-43269	drm/atmel-hlcdc: fix memory leak from the atomic_destroy_state callback
+12	CVE-2026-43243	drm/amd/display: Add signal type check for dcn401 get_phyd32clk_src
+13	CVE-2026-43237	drm/amdgpu: Refactor amdgpu_gem_va_ioctl for Handling Last Fence Update and Timeline Management
+14	CVE-2026-43236	drm/atmel-hlcdc: fix use-after-free of drm_crtc_commit after release
+15	CVE-2026-43211	PCI: Fix pci_slot_trylock() error handling
+16	CVE-2026-43200	PCI: endpoint: Fix swapped parameters in pci_{primary/secondary}_epc_epf_unlink() functions
+17	CVE-2026-43195	drm/amdgpu: validate user queue size constraints
+18	CVE-2026-43191	drm/amd/display: Adjust PHY FSM transition to TX_EN-to-PLL_ON for TMDS on DCN35
+19	CVE-2026-43169	drm/buddy: Prevent BUG_ON by validating rounded allocation
+20	CVE-2026-43147	PCI/IOV: Revert "Add PCI rescan-remove locking when enabling/disabling SR-IOV"
+21	CVE-2026-43131	drm/amd/pm: Fix null pointer dereference issue
+22	CVE-2026-43115	srcu: Use irq_work to start GP in tiny SRCU
+23	CVE-2026-43105	drm/vc4: Fix memory leak of BO array in hang state
+24	CVE-2026-43104	drm/vc4: Fix a memory leak in hang state error path
+25	CVE-2026-43097	PCI: hv: Fix double ida_free in hv_pci_probe error path
+26	CVE-2026-43206	drm/amdkfd: Fix out-of-bounds write in kfd_event_page_set()
+27	CVE-2026-43444	drm/amdkfd: Unreserve bo if queue update failed
+28	CVE-2026-43400	drm/amdgpu: add upper bound check on user inputs in signal ioctl
+29	CVE-2026-43397	drm/bridge: samsung-dsim: Fix memory leak in error path
+30	CVE-2026-43398	drm/amdgpu: add upper bound check on user inputs in wait ioctl
+31	CVE-2026-43399	drm/amdgpu/userq: Fix reference leak in amdgpu_userq_wait_ioctl
+32	CVE-2026-43368	drm/i915: Fix potential overflow of shmem scatterlist length
+33	CVE-2026-43369	drm/amd: Fix NULL pointer dereference in device cleanup
+34	CVE-2026-43370	drm/amdgpu: Fix use-after-free race in VM acquire
+35	CVE-2026-43381	nouveau/dpcd: return EBUSY for aux xfer if the device is asleep
+36	CVE-2026-43395	drm/xe/sync: Cleanup partially initialized sync on parse failure
+37	CVE-2026-43396	drm/xe/sync: Fix user fence leak on alloc failure
+38	CVE-2025-71301	drm/tests: shmem: Hold reservation lock around vmap/vunmap
+39	CVE-2025-71302	drm/panthor: fix for dma-fence safe access rules
+40	CVE-2026-43318	drm/amdgpu: fix sync handling in amdgpu_dma_buf_move_notify
+41	CVE-2026-43320	drm/amd/display: Fix dsc eDP issue
+42	CVE-2026-43367	drm/amd: Fix a few more NULL pointer dereference in device cleanup
+43	CVE-2026-43287	drm: Account property blob allocations to memcg
+44	CVE-2026-43294	drm: renesas: rz-du: mipi_dsi: fix kernel panic when rebooting for some panels
+45	CVE-2026-43298	drm/amdgpu: Skip vcn poison irq release on VF
+46	CVE-2026-43300	drm/panel: Fix a possible null-pointer dereference in jdi_panel_dsi_remove()
+47	CVE-2026-43302	drm/v3d: Set DMA segment size to avoid debug warnings
+48	CVE-2026-43305	drm/amd/display: Fix mismatched unlock for DMUB HW lock in HWSS fast path
+49	CVE-2025-71296	drm/tests: shmem: Hold reservation lock around purge
+50	CVE-2025-71298	drm/tests: shmem: Hold reservation lock around madvise
