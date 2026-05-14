@@ -13,7 +13,7 @@
 
 ### 1.1 Qspinlock 的 32 位值布局
 
-x86 使用 queued spinlock（qspinlock），锁的状态存储在一个 32 位原子变量中。
+使用 queued spinlock（qspinlock），锁的状态存储在一个 32 位原子变量中。
 对应的宏定义在 `include/asm-generic/qspinlock_types.h`，每种字段的偏移和宽度都由宏链式计算：
 
 ```c
@@ -121,7 +121,7 @@ tail_idx = (val >> 9) & 0x3
 - 节点通过 `next` 指针形成**单链表**，方向为 **Head → Tail**。
 - 没有反向指针（`prev`），无法从 Tail 直接回溯到 Head。
 
-### 1.4 mcs_spinlock 结构体（x86_64）
+### 1.4 mcs_spinlock 结构体
 
 ```c
 // include/asm-generic/mcs_spinlock.h

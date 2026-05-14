@@ -8,6 +8,11 @@ in an unsigned long variable. While the !ret check happens to work
 correctly by coincidence (negative values become large positive values),
 the types should match. Use int instead.
 
+Eliminates the following W=3 warning:
+
+  drivers/video/fbdev/core/fbcon.c: In function 'fbcon_set_disp':
+  drivers/video/fbdev/core/fbcon.c:1494:14: warning: implicit conversion from 'int' to 'unsigned long' [-Wconversion]
+
 Fixes: af0db3c1f898 ("fbdev: Fix vmalloc out-of-bounds write in fast_imageblit")
 Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
 ---
