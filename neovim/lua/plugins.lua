@@ -1,4 +1,16 @@
 return {
+  -- Treesitter: syntax parsing & highlighting
+  {
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    config = function()
+      require("nvim-treesitter").setup({
+        ensure_installed = { "c", "lua", "vimdoc", "markdown", "markdown_inline", "query" },
+        auto_install = { enable = true },
+      })
+    end,
+  },
+
   -- Colorscheme
   {
     "olimorris/onedarkpro.nvim",
