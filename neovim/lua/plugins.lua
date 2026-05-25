@@ -76,14 +76,6 @@ return {
     end,
   },
 
-  -- Treesitter: install parsers, highlighting is native in nvim >= 0.10
-  {
-    "nvim-treesitter/nvim-treesitter",
-    build = function()
-      require("nvim-treesitter").install({ "c", "lua", "vim", "query" })
-    end,
-  },
-
   -- Telescope: fuzzy finder
   {
     "nvim-telescope/telescope.nvim",
