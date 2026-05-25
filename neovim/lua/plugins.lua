@@ -147,6 +147,15 @@ return {
     end,
   },
 
+  -- Markdown rendering
+  {
+    "MeanderingProgrammer/render-markdown.nvim",
+    dependencies = { "nvim-treesitter/nvim-treesitter" },
+    config = function()
+      require("render-markdown").setup({})
+    end,
+  },
+
   -- Gitsigns: inline git diff
   {
     "lewis6991/gitsigns.nvim",
@@ -166,4 +175,5 @@ return {
       vim.keymap.set("n", "[h", ":Gitsigns prev_hunk<CR>", { desc = "Prev hunk" })
     end,
   },
+
 }
