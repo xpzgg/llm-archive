@@ -31,7 +31,7 @@
 | `vm_operations_struct` | `include/linux/mm.h` | VMA 的行为接口（fault、open、close） |
 
 重点理解：
-- `mm_struct` 中 `mmap`（VMA 链表）、`mm_rb`（VMA 红黑树）为什么同时维护两种数据结构
+- `mm_struct` 中 `mmap`（VMA 链表）、`mm_mt`（VMA maple tree）为什么同时维护两种数据结构 — 链表按地址顺序遍历，maple tree 按区间快速查找
 - `vm_area_struct` 中 `vm_start`/`vm_end`/`vm_flags`/`vm_file` 各自的含义
 - VMA 的合并规则（`vma_merge()`）
 
@@ -50,6 +50,28 @@ sys_mmap()
 ```
 
 观测：运行任意程序，`cat /proc/self/maps`，对照代码理解每一行的含义。
+
+### 推荐阅读
+
+按顺序读：
+
+1. **建立概念层**
+   - Ulrich Drepper, [What Every Programmer Should Know About Memory](https://people.freebsd.org/~lstewart/articles/cpumemory.pdf) — 只读 Section 4（Virtual Memory）
+   - wowotech, [Linux kernel内存管理的基本概念](http://www.wowotech.net/memory_management/concept.html) — 中文大图
+   - LWN, [Memory part 3: Virtual Memory](https://lwn.net/Articles/253761/)
+
+2. **VMA 结构本身**
+   - LWN, [Not-so-anonymous virtual memory areas](https://lwn.net/Articles/867818/) — VMA 的 anonymous/file-backed 区分
+   - Mel Gorman, [Understanding the Linux Virtual Memory Manager](https://www.kernel.org/doc/gorman/pdf/understand.pdf) — 只读 Chapter 4（Process Address Space），内核版本老，概念层仍然准确
+
+3. **6.6 里的实际数据结构**
+   - LWN, [Introducing the Maple Tree](https://lwn.net/Articles/892724/) — 为什么换掉红黑树，读完再看 `mm_mt` 有背景
+
+4. **理解 process_addrs.rst 的锁模型**
+   - LWN, [How to get rid of mmap_sem](https://lwn.net/Articles/787629/) — mmap_lock 为什么是瓶颈
+   - LWN, [Concurrent page-fault handling with per-VMA locks](https://lwn.net/Articles/906852/) — per-VMA lock 的设计，对应 6.6 的锁模型
+
+> LWN 文章发布一周后对公众免费开放。
 
 ---
 
@@ -132,6 +154,7 @@ do_page_fault()
 
 重点理解：
 - `page` 结构体的 union 设计 — 同一个结构体在不同状态下复用字段（LRU、mapping、slab 等），这是理解 mm 的关键
+  > **[Linux ≥5.16]** 引入 `struct folio`，代表一个或多个连续物理页的逻辑单元。page cache、回收路径已大量用 folio 替换 page。学习时先以 `struct page` 建立认知，遇到 folio 可理解为"一个或多个 page 的包装，接口一致"。
 - `zone` 的存在意义 — 硬件寻址限制（DMA zone）和内存可移动性（MOVABLE zone）是两套不同约束
 - `free_area.free_list[MIGRATE_TYPE]` — buddy free list 按 migrate type 分组，直接影响后续迁移和回收
 - Buddy 的 order 含义 — free_area[0] 是单页，free_area[1] 是 2 页连续块，以此类推
@@ -192,20 +215,36 @@ kmalloc(size, flags)
 
 ### 主干路径：mmap 一个文件后首次访问
 
+这里有两段独立的执行流，不要混在一起：
+
+**① mmap 系统调用：建立 VMA，注册 fault handler**
+
 ```
 mmap(MAP_SHARED, fd)
   → mmap_region()
-    → call_mmap()                        ← 文件系统的 mmap 实现
-      → filemap_fault()                  ← 对于大多数文件系统
-        → page_cache_get_page()
-          → 在 xarray 中查找
+    → call_mmap()                        ← 调用文件系统的 f_op->mmap()
+      → filemap_mmap()（或文件系统自己的实现）
+        → vma->vm_ops = &generic_file_vm_ops  ← 注册 .fault = filemap_fault
+    ← 返回，此时尚未读任何数据，物理页也未分配
+```
+
+**② CPU 首次访问该地址：触发 page fault**
+
+```
+CPU 访问 mmap 区域 → MMU 发现 PTE 不存在
+  → do_page_fault() → handle_mm_fault()
+    → vm_ops->fault()                    ← 调用上面注册的 filemap_fault
+      → filemap_fault()
+        → page_cache_get_page()          ← 在 xarray 中查找 page cache
           → 如果命中：直接返回 page
           → 如果未命中：
             → page_cache_alloc()         ← 分配新 page
-            → add_to_page_cache_lru()    ← 加入 page cache
+            → add_to_page_cache_lru()    ← 加入 page cache 并挂 LRU
             → mapping->a_ops->readpage() ← 从磁盘读入
         → 返回 page，建立 PTE 映射
 ```
+
+> **[Linux ≥5.16]** `page_cache_get_page()` 已被 `filemap_get_folio()` 替代；`readpage()` 被 `read_folio()` 替代。
 
 对比阶段二：anonymous page fault → `do_anonymous_page()` 直接分配；file page fault → `filemap_fault()` 先查 cache。
 
@@ -215,12 +254,14 @@ mmap(MAP_SHARED, fd)
 sys_read()
   → vfs_read()
     → file->f_op->read_iter()
-      → generic_file_buffered_read()
+      → generic_file_buffered_read()     ← 概念路径；实际函数名见注
         → page_cache_get_page()          ← 同样的 page cache 查找
         → copy_page_to_iter()            ← 从 page 拷贝到用户 buffer
 ```
 
-观测：`cat /proc/meminfo` 中 `Cached` 字段；`vmsat -P <pid>` 观察 page cache 命中率。
+> **[Linux ≥5.18]** `generic_file_buffered_read()` 改名为 `filemap_read()`；`page_cache_get_page()` 替换为 `filemap_get_folio()`。
+
+观测：`cat /proc/meminfo` 中 `Cached` 字段；`cat /proc/vmstat | grep pgpgin` 观察 page cache 读入量。
 
 ---
 
@@ -456,7 +497,7 @@ khugepaged 内核线程
 | `/proc/buddyinfo` | buddy 各阶 free 页数 | 三 |
 | `/proc/slabinfo` | slab 缓存状态 | 三 |
 | `/proc/meminfo` | 系统级内存统计（Cached、Buffers） | 四 |
-| `vmsat` | page cache 命中率 | 四 |
+| `cat /proc/vmstat \| grep pgpgin` | page cache 读入量 | 四 |
 | `/proc/zoneinfo` | zone 水位线 | 五 |
 | `/proc/vmstat` | pgscan/kswapd 等回收指标 | 五 |
 | `tracepoint vmscan:*` | kswapd 和 direct reclaim 事件 | 五 |
