@@ -1,2 +1,0 @@
-CVE-2026-43485	nouveau	nouveau/gsp: drop WARN_ON in ACPI probes
-CVE-2026-43477	drm	drm/i915/vrr: Configure VRR timings after enabling TRANS_DDI_FUNC_CTL

@@ -1,3 +1,0 @@
-CVE-2026-31785	drm	drm/xe/xe_pagefault: Disallow writes to read-only VMAs
-CVE-2026-43211	PCI	PCI: Fix pci_slot_trylock() error handling
-CVE-2026-43115	srcu	srcu: Use irq_work to start GP in tiny SRCU

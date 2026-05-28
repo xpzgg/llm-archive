@@ -1,0 +1,5 @@
+- [ ] GICv3 中断 group（Group 0 vs Group 1）和安全扩展的关系
+- [ ] irq_domain hierarchy 在具体 SoC 上的实际拓扑（比如某个 realtek/rockchip 平台）
+- [ ] PREEMPT_RT 下中断线程化的完整行为
+- [ ] ITS LPI 的 pending table 在 power management 中的保存/恢复流程
+- [ ] irqfd（KVM 中断注入）的完整路径

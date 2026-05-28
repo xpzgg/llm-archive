@@ -1,46 +1,40 @@
 #!/usr/bin/env python3
-"""Fetch CVE descriptions from Debian security tracker."""
-import argparse, re, sys, time
-from urllib.request import urlopen
+"""Fetch CVE descriptions from NVD API."""
+import argparse, json, re, sys, time
+from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-URL_PREFIX = "https://security-tracker.debian.org/tracker/"
+NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId="
 
 
 def fetch_one(cve_id: str, retries: int = 5) -> tuple[str, str]:
-    url = URL_PREFIX + cve_id
+    url = NVD_API + cve_id
     for attempt in range(retries):
         try:
-            with urlopen(url, timeout=30) as resp:
-                text = resp.read().decode()
+            req = Request(url, headers={"User-Agent": "cve_fetch/1.0"})
+            with urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
             break
         except URLError:
             if attempt == retries - 1:
                 return cve_id, "FETCH_FAILED"
-            time.sleep(1)
-    # Extract description from the table
-    m = re.search(r"Description.*?</td>\s*<td>(.*?)</td>", text, re.S)
-    if not m:
-        return cve_id, "DESCRIPTION_NOT_FOUND"
-    desc = re.sub(r"<.*?>", "", m.group(1)).strip()
-    # Extract the "module: short desc" part after "resolved: "
-    m2 = re.search(r"resolved:\s*(.*)", desc)
-    if m2:
-        desc = m2.group(1).strip()
-    # Remove "(cherry picked from commit ...)" and similar trailing bits
+            time.sleep(2)
+    try:
+        vulns = data["vulnerabilities"]
+        if not vulns:
+            return cve_id, "NOT_FOUND"
+        desc = vulns[0]["cve"]["descriptions"][0]["value"]
+    except (KeyError, IndexError):
+        return cve_id, "PARSE_ERROR"
+    # Strip the standard prefix
+    m = re.search(r"resolved:\s*", desc)
+    if m:
+        desc = desc[m.end():]
+    # Take first line (the actual patch subject)
+    desc = desc.split("\n")[0].strip()
+    # Remove "(cherry picked from commit ...)"
     desc = re.sub(r"\s*\(cherry picked from commit.*?\)", "", desc)
-    # The title is everything before "  " (two+ spaces) or the first sentence
-    # Format: "module/subsys: Title  Detail paragraph..."
-    m3 = re.match(r"^(.+?(?:\.\s*|  ))", desc)
-    if m3:
-        title = m3.group(1).strip()
-        # If title ends with double-space separator, strip it
-        title = title.rstrip()
-        desc = title
-    else:
-        desc = desc.split("\n")[0].strip()
     # Extract top-level module (e.g. "drm/xe/xe_pagefault: ..." -> "drm")
-    # Skip leading Revert/Revert" prefix if present
     m4 = re.match(r'^(?:Revert\s+")?([^:/]+)', desc)
     module = m4.group(1).strip() if m4 else ""
     return cve_id, module, desc
@@ -48,8 +42,8 @@ def fetch_one(cve_id: str, retries: int = 5) -> tuple[str, str]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch CVE patch descriptions from Debian security tracker.\n"
-                    "Reads CVE IDs from an input file, queries security-tracker.debian.org,\n"
+        description="Fetch CVE patch descriptions from NVD.\n"
+                    "Reads CVE IDs from an input file, queries NVD API,\n"
                     "and overwrites the file with tab-separated results:\n"
                     "  CVE_ID<TAB>module<TAB>description",
         epilog="example:\n"
@@ -73,7 +67,6 @@ def main():
     entries = []
     for line in lines:
         parts = line.split()
-        # Take the last field that looks like a CVE ID
         cve_id = next((p for p in reversed(parts) if p.startswith("CVE-")), parts[-1])
         entries.append(cve_id)
 
@@ -82,7 +75,7 @@ def main():
     for i, cve in enumerate(entries):
         cve_id, module, desc = fetch_one(cve)
         results[cve_id] = (module, desc)
-        print(f"[{i+1}/{len(entries)}] {cve_id}: {module} | {desc[:50]}...")
+        print(f"[{i+1}/{len(entries)}] {cve_id}: {module} | {desc[:60]}...")
         if i < len(entries) - 1:
             time.sleep(0.5)
 
