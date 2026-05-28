@@ -1,171 +1,190 @@
-<mxfile host="app.diagrams.net" modified="2026-05-28T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+<mxfile host="app.diagrams.net" modified="2026-05-28T00:00:00.000Z" agent="Claude" version="24.7.17" type="device">
   <diagram id="register_model" name="中断注册心智模型">
     <mxGraphModel dx="1280" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="1800" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="r_title" value="Linux arm64 中断注册：建立“硬件中断号 -> Linux IRQ -> 驱动 handler”的地图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="90" y="30" width="920" height="50" as="geometry"/>
+        <mxCell id="r_title" value="Linux arm64 中断注册：建立 hwirq -&gt; Linux IRQ -&gt; 驱动 handler 的地图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="50" y="25" width="1000" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="r_lane_hw" value="硬件描述 / GIC" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="110" width="180" height="1510" as="geometry"/>
+        <mxCell id="r_bg" value="GICv3 四种中断类型&#xa;SGI (INTID 0-15)：核间IPI，软件触发&#xa;PPI (INTID 16-31)：每CPU私有，如timer、PMU&#xa;SPI (INTID 32-1019)：共享外设中断&#xa;LPI (INTID &gt;= 8192)：基于ITS，如PCIe MSI/MSI-X&#xa;颜色：黄=硬件/GIC | 绿=内核IRQ core | 粉=设备驱动" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=14;spacing=8;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="50" y="90" width="1000" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="r_lane_core" value="irq core / irq_domain" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="250" y="110" width="390" height="1510" as="geometry"/>
+        <mxCell id="r_ph1" value="Phase 1：中断控制器初始化（启动阶段）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#cccccc;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="230" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="r_lane_drv" value="设备驱动" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#f8cecc;strokeColor=#b85450;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="670" y="110" width="390" height="1510" as="geometry"/>
+        <mxCell id="r1" value="start_kernel() -&gt; init_IRQ() -&gt; irqchip_init()&#xa;启动期扫描irqchip，找到GIC驱动" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="285" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_hw1" value="DT / ACPI 描述中断控制器&#xa;GIC distributor / redistributor / CPU interface" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="70" y="170" width="130" height="110" as="geometry"/>
+        <mxCell id="r2" value="gic_of_init() / gic_acpi_init()&#xa;初始化GIC基址、per-cpu redistributor、默认mask/priority" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="360" width="990" height="70" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core1" value="start_kernel() -> init_IRQ() -> irqchip_init()&#xa;启动期扫描 irqchip，并找到 GIC 驱动" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="170" width="290" height="90" as="geometry"/>
+        <mxCell id="r3" value="创建 irq_domain&#xa;核心意义：把GIC INTID/hwirq翻译成Linux virq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="450" width="990" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core2" value="gic_of_init() / gic_acpi_init()&#xa;初始化 GIC 基址、per-cpu redistributor、默认 mask/priority" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="310" width="290" height="100" as="geometry"/>
+        <mxCell id="r4" value="set_handle_irq(gic_handle_irq)&#xa;把arm64顶层IRQ入口接到GIC分发器" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="535" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core3" value="创建 irq_domain&#xa;核心意义：把 GIC INTID/hwirq 翻译成 Linux virq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="460" width="290" height="100" as="geometry"/>
+        <mxCell id="r_ph2" value="Phase 2：设备中断映射（驱动probe阶段）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#cccccc;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="610" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core4" value="set_handle_irq(gic_handle_irq)&#xa;把 arm64 顶层 IRQ 入口接到 GIC 分发器" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="610" width="290" height="90" as="geometry"/>
+        <mxCell id="r5" value="DT / ACPI 描述设备中断&#xa;例：GIC_SPI + INTID + trigger flags" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="665" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_hw2" value="设备节点 interrupt spec&#xa;例：GIC_SPI + INTID + trigger flags" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="70" y="760" width="130" height="110" as="geometry"/>
+        <mxCell id="r6" value="driver probe() -&gt; platform_get_irq() / of_irq_get()&#xa;解析设备interrupt spec，得到fwspec" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="740" width="990" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="r_drv1" value="driver probe()&#xa;驱动拿到设备资源，准备申请 IRQ" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="720" y="760" width="290" height="90" as="geometry"/>
+        <mxCell id="r7" value="irq_create_fwspec_mapping()&#xa;调用irq_domain ops：translate / alloc / map" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="825" width="990" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="r_drv2" value="platform_get_irq() / of_irq_get()&#xa;解析设备 interrupt spec，得到 fwspec" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="720" y="900" width="290" height="90" as="geometry"/>
+        <mxCell id="r8" value="分配或查找 virq + irq_desc&#xa;desc是Linux管这个中断的软件对象" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="910" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core5" value="irq_create_fwspec_mapping()&#xa;调用 irq_domain ops：translate / alloc / map" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="900" width="290" height="90" as="geometry"/>
+        <mxCell id="r9" value="填充 irq_data / irq_chip / flow handler&#xa;irq_data记hwirq；irq_chip指向GIC mask/unmask/eoi；flow handler决定level/edge/fasteoi语义" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="985" width="990" height="80" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core6" value="分配或查找 virq + irq_desc&#xa;desc 是 Linux 管这个中断的软件对象" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="1040" width="290" height="90" as="geometry"/>
+        <mxCell id="r_ph3" value="Phase 3：驱动注册handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#cccccc;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1085" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core7" value="填充 irq_data / irq_chip / flow handler&#xa;irq_data 记 hwirq；irq_chip 指向 GIC mask/unmask/eoi；flow handler 决定 level/edge/fasteoi 语义" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="275" y="1180" width="340" height="120" as="geometry"/>
+        <mxCell id="r10" value="request_irq() / devm_request_irq()&#xa;驱动提交：virq、handler、flags、name、dev_id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1140" width="990" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="r_drv3" value="request_irq() / devm_request_irq()&#xa;驱动提交：virq、handler、flags、name、dev_id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="720" y="1180" width="290" height="100" as="geometry"/>
+        <mxCell id="r11" value="request_threaded_irq() -&gt; __setup_irq()&#xa;创建irqaction，挂到desc-&gt;action链表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1225" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core8" value="request_threaded_irq() -> __setup_irq()&#xa;创建 irqaction，挂到 desc->action 链表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="1340" width="290" height="95" as="geometry"/>
+        <mxCell id="r12" value="irq_startup() / irq_enable()&#xa;通过irq_chip调GIC unmask，硬件中断真正放行" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1300" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="r_core9" value="irq_startup() / irq_enable()&#xa;通过 irq_chip 调 GIC unmask，硬件中断真正放行" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="300" y="1490" width="290" height="95" as="geometry"/>
+        <mxCell id="r_result" value="注册完成后的状态：设备的hwirq已能找到desc；desc-&gt;action已能找到驱动handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eadcf8;strokeColor=#9673a6;fontSize=15;fontStyle=1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1380" width="990" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="r_drv4" value="读代码时记住这个结果&#xa;设备的 hwirq 已经能找到 desc；desc->action 已经能找到驱动 handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eadcf8;strokeColor=#9673a6;fontSize=15;fontStyle=1;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="720" y="1490" width="290" height="95" as="geometry"/>
+        <mxCell id="r_ds" value="关键数据结构关系&#xa;hwirq/INTID -&gt; irq_domain -&gt; virq -&gt; irq_desc&#xa;irq_desc -&gt; irq_data -&gt; irq_chip (GIC ops)&#xa;irq_desc -&gt; irqaction -&gt; driver handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1455" width="480" height="100" as="geometry"/>
         </mxCell>
-        <mxCell id="r_note1" value="关键数据结构关系&#xa;hwirq/INTID -> irq_domain -> virq -> irq_desc&#xa;irq_desc -> irq_data -> irq_chip(GIC ops)&#xa;irq_desc -> irqaction -> driver handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="705" y="330" width="320" height="150" as="geometry"/>
+        <mxCell id="r_src" value="源码锚点&#xa;drivers/irqchip/irq-gic-v3.c&#xa;kernel/irq/irqdomain.c&#xa;kernel/irq/manage.c&#xa;include/linux/irqdesc.h / irq.h" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1455" width="480" height="100" as="geometry"/>
         </mxCell>
-        <mxCell id="r_note2" value="源码锚点&#xa;drivers/irqchip/irq-gic-v3.c&#xa;kernel/irq/irqdomain.c&#xa;kernel/irq/manage.c&#xa;include/linux/irqdesc.h / irq.h" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="705" y="520" width="320" height="140" as="geometry"/>
-        </mxCell>
-        <mxCell id="re1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core1" target="r_core2"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core2" target="r_core3"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core3" target="r_core4"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_hw2" target="r_drv2"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="220" y="945"/><mxPoint x="670" y="945"/></Array></mxGeometry></mxCell>
-        <mxCell id="re5" value="fwspec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r_drv2" target="r_core5"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="665" y="945"/><mxPoint x="665" y="945"/></Array></mxGeometry></mxCell>
-        <mxCell id="re6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core5" target="r_core6"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core6" target="r_core7"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re8" value="virq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r_core6" target="r_drv3"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="640" y="1085"/><mxPoint x="640" y="1230"/></Array></mxGeometry></mxCell>
-        <mxCell id="re9" value="handler" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r_drv3" target="r_core8"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="665" y="1230"/><mxPoint x="665" y="1388"/></Array></mxGeometry></mxCell>
-        <mxCell id="re10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r_core8" target="r_core9"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="re11" value="完成注册后的心智状态" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r_core9" target="r_drv4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r1" target="r2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r2" target="r3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r3" target="r4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re4" value="irq_domain就绪" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r4" target="r5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re5" value="fwspec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r6" target="r7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r7" target="r8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r8" target="r9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re8" value="virq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r9" target="r10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re9" value="handler" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r10" target="r11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="r11" target="r12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re11" value="注册完成" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="r12" target="r_result"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
   <diagram id="trigger_model" name="中断触发心智模型">
-    <mxGraphModel dx="1280" dy="1900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="1900" math="0" shadow="0">
+    <mxGraphModel dx="1280" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="2400" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="t_title" value="Linux arm64 中断触发：硬件事件如何找到注册时挂上的 handler" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="90" y="30" width="920" height="50" as="geometry"/>
+        <mxCell id="t_title" value="Linux arm64 中断触发：硬件事件如何找到注册时挂上的handler" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="50" y="25" width="1000" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="t_lane_hw" value="外设 / GIC" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="110" width="230" height="1650" as="geometry"/>
+        <mxCell id="t_bg" value="GICv3 四种中断类型：SGI (0-15) 核间IPI | PPI (16-31) 每CPU私有 | SPI (32-1019) 共享外设 | LPI (&gt;=8192) 基于ITS&#xa;特殊INTID 1020-1023 表示spurious/special&#xa;颜色：黄=硬件/GIC | 蓝=arm64架构层 | 绿=内核IRQ core | 粉=驱动handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=14;spacing=8;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="50" y="90" width="1000" height="90" as="geometry"/>
         </mxCell>
-        <mxCell id="t_lane_entry" value="arm64 exception entry" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="300" y="110" width="230" height="1650" as="geometry"/>
+        <mxCell id="t_ph1" value="Phase 1：硬件触发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="200" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="t_lane_core" value="irq core" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="560" y="110" width="230" height="1650" as="geometry"/>
+        <mxCell id="t1" value="外设拉起IRQ line，GIC看到某个INTID pending" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="255" width="990" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="t_lane_drv" value="驱动 handler" style="swimlane;horizontal=0;html=1;startSize=36;fillColor=#f8cecc;strokeColor=#b85450;fontSize=16;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="820" y="110" width="230" height="1650" as="geometry"/>
+        <mxCell id="t2" value="GIC选择目标CPU&#xa;优先级、mask、affinity共同决定是否送达" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="325" width="990" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="t1" value="外设拉起 IRQ&#xa;GIC 看到某个 INTID pending" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="75" y="170" width="160" height="90" as="geometry"/>
+        <mxCell id="t_ph2" value="Phase 2：CPU Exception Entry（含NMI/FIQ分支）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="405" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="t2" value="GIC 选择目标 CPU&#xa;优先级、mask、affinity 共同决定是否送达" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="75" y="310" width="160" height="105" as="geometry"/>
+        <mxCell id="t3" value="CPU硬件自动进入IRQ exception&#xa;保存PC/PSR到SPSR_ELx/ELR_ELx，跳到vector（entry.S）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="460" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="t3" value="CPU 进入 IRQ exception&#xa;保存现场，切到 vector" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="335" y="310" width="160" height="90" as="geometry"/>
+        <mxCell id="t4" value="el1h_64_irq_handler()（内核态入口；用户态走el0路径后进入同类处理）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="535" width="990" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="t4" value="el1h_64_irq_handler()&#xa;内核态常见入口；用户态会走 el0 路径后进入同一类处理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="335" y="455" width="160" height="115" as="geometry"/>
+        <mxCell id="t5" value="el1_interrupt(regs, handle_arch_irq)&#xa;设置DAIF，根据中断屏蔽状态分支（CONFIG_ARM64_PSEUDO_NMI）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="605" width="990" height="50" as="geometry"/>
         </mxCell>
-        <mxCell id="t5" value="el1_interrupt()&#xa;irq_enter_rcu(); do_interrupt_handler(); irq_exit_rcu()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="335" y="625" width="160" height="115" as="geometry"/>
+        <mxCell id="t5a" value="__el1_irq（普通IRQ路径）&#xa;irq_enter_rcu()&#xa;do_interrupt_handler(regs, handler)&#xa;irq_exit_rcu()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="680" width="490" height="85" as="geometry"/>
         </mxCell>
-        <mxCell id="t6" value="handle_arch_irq(regs)&#xa;注册阶段已被 set_handle_irq() 设为 gic_handle_irq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="335" y="795" width="160" height="115" as="geometry"/>
+        <mxCell id="t5b" value="__el1_pnmi（Pseudo NMI路径）&#xa;irqentry_nmi_enter(regs)&#xa;do_interrupt_handler(regs, handler)&#xa;irqentry_nmi_exit(regs, state)&#xa;不经过RCU、不触发softirq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;spacing=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="680" width="490" height="95" as="geometry"/>
         </mxCell>
-        <mxCell id="t7" value="gic_handle_irq()&#xa;进入 GIC 驱动的顶层分发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="75" y="795" width="160" height="90" as="geometry"/>
+        <mxCell id="t_fiq" value="FIQ路径：el1h_64_fiq_handler -&gt; el1_interrupt(regs, handle_arch_fiq)&#xa;GICv3 Group 0中断通过FIQ向量交付，同样进入NMI分支判断&#xa;条件：CONFIG_ARM64_PSEUDO_NMI &amp;&amp; IRQ已屏蔽 (regs_irqs_disabled)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=13;spacing=8;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="50" y="795" width="990" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="t8" value="gic_read_iar()&#xa;读 IAR，拿到 INTID/hwirq；特殊号 1020-1023 表示 spurious/special" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="75" y="950" width="160" height="125" as="geometry"/>
+        <mxCell id="t6" value="do_interrupt_handler() -&gt; handle_arch_irq(regs)&#xa;[即gic_handle_irq，注册阶段由set_handle_irq()设定]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="880" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="t9" value="gic_complete_ack()&#xa;对 GIC 做 EOI/ack；之后把 hwirq 交给 irq_domain" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="75" y="1130" width="160" height="115" as="geometry"/>
+        <mxCell id="t_ph3" value="Phase 3：GIC驱动分发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="955" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="t10" value="generic_handle_domain_irq(domain, hwirq)&#xa;用注册阶段建好的 irq_domain 找 virq/desc" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="590" y="1130" width="170" height="115" as="geometry"/>
+        <mxCell id="t7" value="gic_handle_irq() -&gt; gic_read_iar()&#xa;读IAR拿到INTID/hwirq（读操作本身就是ack，隐式priority drop）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1010" width="990" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="t11" value="generic_handle_irq_desc(desc)&#xa;进入 desc->handle_irq，即 flow handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="590" y="1300" width="170" height="105" as="geometry"/>
+        <mxCell id="t8" value="gic_write_eoir(irq)：显式priority drop（EOI）&#xa;中断可被重新pending，但尚未deactivate（GICv3两阶段EOI的第一阶段）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1090" width="990" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="t12" value="flow handler&#xa;handle_fasteoi_irq / handle_level_irq / handle_edge_irq；负责 mask/ack/eoi/retrigger 语义" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="590" y="1460" width="170" height="130" as="geometry"/>
+        <mxCell id="t_ph4" value="Phase 4：IRQ Core分发与驱动调用" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1170" width="1040" height="38" as="geometry"/>
         </mxCell>
-        <mxCell id="t13" value="handle_irq_event()&#xa;遍历 desc->action 链表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="590" y="1645" width="170" height="90" as="geometry"/>
+        <mxCell id="t9" value="generic_handle_domain_irq(domain, hwirq)&#xa;用注册阶段建好的irq_domain找virq -&gt; desc" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1225" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="t14" value="action->handler(irq, dev_id)&#xa;真正进入驱动注册的 hardirq handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="850" y="1645" width="170" height="90" as="geometry"/>
+        <mxCell id="t10" value="generic_handle_irq_desc(desc) -&gt; desc-&gt;handle_irq&#xa;即flow handler（注册阶段设定的）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1300" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="t15" value="返回值决定后续&#xa;IRQ_HANDLED：完成&#xa;IRQ_WAKE_THREAD：唤醒 threaded IRQ" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="850" y="1475" width="170" height="105" as="geometry"/>
+        <mxCell id="t11" value="flow handler: handle_fasteoi_irq / handle_level_irq / handle_edge_irq&#xa;负责mask/ack/eoi/retrigger语义" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1375" width="990" height="55" as="geometry"/>
         </mxCell>
-        <mxCell id="t_note1" value="触发路径的核心跳转&#xa;硬件只知道 INTID/hwirq；Linux 通过 irq_domain 找 desc；desc 通过 action 找驱动 handler。" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="580" y="185" width="430" height="105" as="geometry"/>
+        <mxCell id="t12" value="handle_irq_event() -&gt; 遍历desc-&gt;action链表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1450" width="990" height="45" as="geometry"/>
         </mxCell>
-        <mxCell id="t_note2" value="读代码锚点&#xa;arch/arm64/kernel/entry-common.c：exception 入口&#xa;drivers/irqchip/irq-gic-v3.c：gic_handle_irq / IAR / EOI&#xa;kernel/irq/irqdesc.c：generic_handle_irq_desc&#xa;kernel/irq/chip.c：flow handlers&#xa;kernel/irq/handle.c：调用 irqaction handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;" vertex="1" parent="1">
-          <mxGeometry x="580" y="330" width="430" height="165" as="geometry"/>
+        <mxCell id="t13" value="action-&gt;handler(irq, dev_id)&#xa;真正进入驱动注册的hardirq handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1515" width="990" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="t_ph5" value="Phase 5：中断返回与后续处理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#cccccc;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=15;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1590" width="1040" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="t14" value="handler返回值：IRQ_HANDLED完成 / IRQ_WAKE_THREAD唤醒threaded IRQ" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1645" width="990" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="t15" value="gic_finish_irq()：写DIR deactivate（GICv3两阶段EOI的deactivate阶段）&#xa;中断彻底完成，可以再次触发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1710" width="990" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="t16" value="irq_exit_rcu() -&gt; invoke_softirq()&#xa;处理softirq（tasklet、net_rx等下半部）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1785" width="990" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="t_insight" value="核心跳转：硬件只知道INTID/hwirq -&gt; Linux通过irq_domain找desc -&gt; desc通过action找驱动handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eadcf8;strokeColor=#9673a6;fontSize=15;fontStyle=1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1870" width="990" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="t_src" value="读代码锚点&#xa;arch/arm64/kernel/entry.S：vector表&#xa;arch/arm64/kernel/entry-common.c：exception入口 + NMI分支&#xa;drivers/irqchip/irq-gic-v3.c：gic_handle_irq / IAR / EOI / DIR&#xa;kernel/irq/irqdesc.c：generic_handle_irq_desc&#xa;kernel/irq/chip.c：flow handlers&#xa;kernel/irq/handle.c：调用irqaction handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacing=8;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1940" width="990" height="120" as="geometry"/>
         </mxCell>
         <mxCell id="te1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t1" target="t2"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="te2" value="exception" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t2" target="t3"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="te3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t3" target="t4"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="te4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t4" target="t5"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t5" target="t6"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te6" value="call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t6" target="t7"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t7" target="t8"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t8" target="t9"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te9" value="hwirq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t9" target="t10"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="1188"/><mxPoint x="560" y="1188"/></Array></mxGeometry></mxCell>
-        <mxCell id="te10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t10" target="t11"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t11" target="t12"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t12" target="t13"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te13" value="irqaction" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t13" target="t14"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="te14" value="return" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t14" target="t15"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te5a" value="IRQ未屏蔽" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=12;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="t5" target="t5a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te5b" value="IRQ已屏蔽(NMI)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=12;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="t5" target="t5b"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te6a" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="t5a" target="t6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te6b" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="t5b" target="t6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te7" value="call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t6" target="t7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te8" value="priority drop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t7" target="t8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te9" value="hwirq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t8" target="t9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te10" value="desc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t9" target="t10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t10" target="t11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;" edge="1" parent="1" source="t11" target="t12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te13" value="irqaction" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t12" target="t13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te14" value="return" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t13" target="t14"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te15" value="deactivate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t14" target="t15"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te16" value="softirq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=13;" edge="1" parent="1" source="t15" target="t16"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
