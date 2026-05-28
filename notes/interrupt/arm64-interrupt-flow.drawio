@@ -1,0 +1,134 @@
+<mxfile host="app.diagrams.net" modified="2026-05-28T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="arm64_irq_register" name="中断注册">
+    <mxGraphModel dx="1200" dy="1750" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1750" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="r_title" value="Linux arm64 中断注册关键流程" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="140" y="30" width="570" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="r1" value="start_kernel()&#xa;启动阶段进入通用初始化" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="100" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2" value="init_IRQ()&#xa;体系结构中断初始化入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="210" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r3" value="irqchip_init()&#xa;扫描 DT/ACPI 中断控制器" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="320" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4" value="gic_of_init() / gic_acpi_init()&#xa;匹配 GICv3 irqchip 驱动" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="430" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r5" value="gic_init_bases()&#xa;初始化 Distributor / Redistributor" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="540" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r6" value="irq_domain 创建&#xa;建立 hwirq 到 Linux virq 的映射规则" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="650" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r7" value="set_handle_irq(gic_handle_irq)&#xa;设置 arm64 顶层中断分发函数" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="770" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r8" value="设备节点 interrupt spec&#xa;DT interrupts / ACPI GSIV 描述硬件中断号" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="890" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r9" value="driver probe()&#xa;驱动开始申请设备 IRQ" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1010" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r10" value="platform_get_irq() / of_irq_get()&#xa;解析 interrupt spec" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1120" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="r11" value="irq_create_fwspec_mapping()&#xa;通过 irq_domain 分配/查找 virq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1230" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r12" value="request_irq() / devm_request_irq()&#xa;驱动提交 handler、flags、dev_id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1350" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r13" value="request_threaded_irq() -> __setup_irq()&#xa;创建 irqaction 并挂到 irq_desc" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1470" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="r14" value="irq_startup() / irq_enable()&#xa;GIC unmask，设备 IRQ 可触发" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;fontStyle=1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1590" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="re12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r1" target="r2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r2" target="r3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r3" target="r4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re45" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r4" target="r5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re56" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r5" target="r6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re67" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r6" target="r7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re78" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r7" target="r8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re89" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r8" target="r9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re910" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r9" target="r10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1011" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r10" target="r11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1112" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r11" target="r12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1213" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r12" target="r13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1314" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="r13" target="r14"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="arm64_irq_trigger" name="中断触发">
+    <mxGraphModel dx="1200" dy="1880" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1880" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t_title" value="Linux arm64 中断触发关键流程" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="140" y="30" width="570" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t1" value="外设产生 IRQ&#xa;中断线进入 GIC" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="100" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="t2" value="GIC Distributor / Redistributor&#xa;记录 pending，按优先级选择目标 CPU" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="215" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t3" value="CPU 接收 IRQ exception&#xa;跳入 arm64 exception vector" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="340" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t4" value="el1h_64_irq_handler()&#xa;常见内核态 IRQ 入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="465" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="t5" value="el1_interrupt(regs, handle_arch_irq)&#xa;进入通用异常处理框架" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="575" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t6" value="do_interrupt_handler()&#xa;调用当前架构注册的 handle_arch_irq" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="700" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t7" value="handle_arch_irq = gic_handle_irq()&#xa;由注册阶段 set_handle_irq() 设置" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="825" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t8" value="gic_read_iar()&#xa;读取 IAR，获得 GIC hwirq / INTID" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="950" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t9" value="generic_handle_domain_irq(gic_data.domain, hwirq)&#xa;从 irq_domain 找到 Linux virq / irq_desc" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="225" y="1075" width="400" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="t10" value="generic_handle_irq_desc(desc)&#xa;进入该 IRQ 的 flow handler" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1205" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t11" value="desc->handle_irq()&#xa;handle_fasteoi_irq() / handle_level_irq() / handle_edge_irq()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="225" y="1330" width="400" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="t12" value="handle_irq_event()&#xa;遍历 irq_desc 上的 irqaction 链表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="1460" width="300" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="t13" value="__handle_irq_event_percpu()&#xa;调用 action->handler()，必要时唤醒 irq thread" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="225" y="1585" width="400" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="t14" value="irq_eoi / unmask / return from exception&#xa;GIC 完成应答，CPU 返回被打断现场" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;fontStyle=1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="225" y="1715" width="400" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="te12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t1" target="t2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t2" target="t3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t3" target="t4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te45" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t4" target="t5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te56" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t5" target="t6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te67" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t6" target="t7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te78" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t7" target="t8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te89" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t8" target="t9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te910" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t9" target="t10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te1011" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t10" target="t11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te1112" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t11" target="t12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te1213" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t12" target="t13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te1314" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="t13" target="t14"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
