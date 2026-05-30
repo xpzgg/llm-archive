@@ -1,9 +1,15 @@
-CVE-2026-46009	PCI	PCI: endpoint: pci-epf-ntb: Remove duplicate resource teardown
-CVE-2026-45979	drm	drm/amdgpu: clean up the amdgpu_cs_parser_bos
-CVE-2026-45976	drm	drm/amdgpu: Fix memory leak in amdgpu_ras_init()
-CVE-2026-45957	rcu	rcu: Fix rcu_read_unlock() deadloop due to softirq
-CVE-2026-45880	PCI	PCI/P2PDMA: Release per-CPU pgmap ref when vm_insert_page() fails
-CVE-2026-45878	drm	drm/amdkfd: Fix watch_id bounds checking in debug address watch v2
-CVE-2026-45853	drm	drm/amdgpu: Use kvfree instead of kfree in amdgpu_gmc_get_nps_memranges()
-CVE-2025-71307	drm	drm/panthor: Fix NULL pointer dereference on panthor_fw_unplug
-CVE-2025-71305	drm	drm/display/dp_mst: Add protection against 0 vcpi
+CVE-2026-46237	drm	drm/amdgpu/vcn3: Avoid overflow on msg bound check
+CVE-2026-46230	drm	drm/amdgpu/vcn3: Prevent OOB reads when parsing dec msg
+CVE-2026-46229	drm	drm/amdkfd: Clear VRAM on allocation to prevent stale data exposure
+CVE-2026-46224	drm	drm/xe: Fix bo leak in xe_dma_buf_init_obj() on allocation failure
+CVE-2026-46220	drm	drm/amdgpu/sdma4: replace BUG_ON with WARN_ON in fence emission
+CVE-2026-46218	drm	drm/amdgpu: Add bounds checking to ib_{get,set}_value
+CVE-2026-46217	drm	drm/amdgpu/vcn4: Avoid overflow on msg bound check
+CVE-2026-46216	drm	drm/xe/hdcp: Add NULL check for media_gt in intel_hdcp_gsc_check_status()
+CVE-2026-46215	drm	drm: Set old handle to NULL before prime swap in change_handle
+CVE-2026-46211	drm	drm/msm/gem: fix error handling in msm_ioctl_gem_info_get_metadata()
+CVE-2026-46209	drm	drm/gem: Fix inconsistent plane dimension calculation in drm_gem_fb_init_with_funcs()
+CVE-2026-46204	drm	drm/amdgpu/vcn4: Prevent OOB reads when parsing IB
+CVE-2026-46201	drm	drm/xe: Fix dma-buf attachment leak in xe_gem_prime_import()
+CVE-2026-46199	drm	drm/amdgpu/vcn4: Prevent OOB reads when parsing dec msg
+CVE-2026-46197	drm	drm/amdkfd: validate SVM ioctl nattr against buffer size
