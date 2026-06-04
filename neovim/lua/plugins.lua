@@ -95,7 +95,10 @@ return {
     config = function()
       local builtin = require("telescope.builtin")
       require("telescope").setup({
-        defaults = { file_ignore_patterns = { ".git/" } },
+        defaults = {
+          file_ignore_patterns = { ".git/" },
+          sorting_strategy = "ascending",
+        },
         pickers = { find_files = { find_command = { "fdfind", "--type", "f", "--hidden", "--follow" } } },
       })
       vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find files" })
