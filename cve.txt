@@ -1,6 +1,8 @@
-CVE-2026-46268	PCI	PCI/P2PDMA: Fix p2pmem_alloc_mmap() warning condition
-CVE-2026-46264	drm	drm/xe/pf: Fix sysfs initialization
-CVE-2026-46263	drm	drm/amd/display: Fix out-of-bounds stream encoder index v3
-CVE-2026-46245	drm	drm/amd/display: Fix dc_link NULL handling in HPD init
-CVE-2025-71314	drm	drm/panthor: Recover from panthor_gpu_flush_caches() failures
-CVE-2025-71313	PCI	PCI: endpoint: Add missing NULL check for alloc_workqueue()
+CVE-2026-43337	drm	drm/amd/display: Fix NULL pointer dereference in dcn401_init_hw()
+CVE-2026-52904	drm	drm/nouveau: fix nvkm_device leak on aperture removal failure
+CVE-2025-71315	drm	drm/vkms: Convert to DRM's vblank timer
+CVE-2026-46276	drm	drm/amdgpu: fix zero-size GDS range init on RDNA4
+CVE-2026-46278	drm	drm/imagination: Fix segfault when updating ftrace mask
+CVE-2026-46309	drm	drm/xe/uapi: Reject coh_none PAT index for CPU cached memory in madvise
+CVE-2026-46311	drm	drm/amdgpu/userq: fix access to stale wptr mapping
+CVE-2026-46314	drm	drm/v3d: Reject empty multisync extension to prevent infinite loop
