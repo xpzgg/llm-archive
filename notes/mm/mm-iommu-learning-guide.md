@@ -59,14 +59,10 @@ sys_mmap()
    - Ulrich Drepper, [What Every Programmer Should Know About Memory](https://people.freebsd.org/~lstewart/articles/cpumemory.pdf) — 只读 Section 4（Virtual Memory）
    - wowotech, [Linux kernel内存管理的基本概念](http://www.wowotech.net/memory_management/concept.html) — 中文大图
    - LWN, [Memory part 3: Virtual Memory](https://lwn.net/Articles/253761/)
-
 2. **VMA 结构本身**
    - LWN, [Not-so-anonymous virtual memory areas](https://lwn.net/Articles/867818/) — VMA 的 anonymous/file-backed 区分
-   - Mel Gorman, [Understanding the Linux Virtual Memory Manager](https://www.kernel.org/doc/gorman/pdf/understand.pdf) — 只读 Chapter 4（Process Address Space），内核版本老，概念层仍然准确
-
 3. **6.6 里的实际数据结构**
    - LWN, [Introducing the Maple Tree](https://lwn.net/Articles/892724/) — 为什么换掉红黑树，读完再看 `mm_mt` 有背景
-
 4. **理解 process_addrs.rst 的锁模型**
    - LWN, [How to get rid of mmap_sem](https://lwn.net/Articles/787629/) — mmap_lock 为什么是瓶颈
    - LWN, [Concurrent page-fault handling with per-VMA locks](https://lwn.net/Articles/906852/) — per-VMA lock 的设计，对应 6.6 的锁模型
