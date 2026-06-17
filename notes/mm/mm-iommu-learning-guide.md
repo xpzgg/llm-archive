@@ -31,23 +31,51 @@
 | `vm_operations_struct` | `include/linux/mm.h` | VMA 的行为接口（fault、open、close） |
 
 重点理解：
-- `mm_struct` 中 `mmap`（VMA 链表）、`mm_mt`（VMA maple tree）为什么同时维护两种数据结构 — 链表按地址顺序遍历，maple tree 按区间快速查找
+- `mm_struct` 中 `mm_mt`（VMA maple tree）是 6.1+ 唯一的 VMA 索引结构，同时支持顺序遍历和区间查找（替换了旧的 rb-tree + linked list）
 - `vm_area_struct` 中 `vm_start`/`vm_end`/`vm_flags`/`vm_file` 各自的含义
-- VMA 的合并规则（`vma_merge()`）
+- VMA 的合并规则（`vma_merge_new_range()`）：相邻 VMA 若 flags/file/pgoff 相同则自动合并，减少条目数
 
 ### 主干路径：mmap 系统调用创建 VMA
 
+ARM64 入口在 `arch/arm64/kernel/sys.c`，做页对齐检查后进入通用路径：
+
 ```
-sys_mmap()
-  (arch/x86/kernel/sys_x86_64.c 或类似)
-  → vm_mmap_pgoff()
-    → do_mmap()
-      → mmap_region()
-        → vma_merge()        ← 能和相邻 VMA 合并吗？
-        → vm_area_alloc()    ← 分配新 VMA
-        → vma_link()         ← 插入链表和红黑树
-        → vm_ops->open()     ← 调用 VMA 的 open 回调
+SYSCALL_DEFINE6(mmap)              arch/arm64/kernel/sys.c
+  └─ ksys_mmap_pgoff()
+       └─ do_mmap()                mm/mmap.c
+            │
+            ├─ get_unmapped_area() ← 找空余地址（见下）
+            │
+            └─ mmap_region()       mm/vma.c
+                 └─ __mmap_region()
+                      ├─ __mmap_setup()            overlap 检测 + accounting
+                      ├─ vma_merge_new_range()      能合并相邻 VMA 就合并
+                      └─ __mmap_new_vma()           合并失败 → 新建
+                           ├─ vm_area_alloc()           slab 分配 VMA 对象
+                           ├─ vma_iter_prealloc()        预分配 maple tree 节点
+                           ├─ vma_set_anonymous()        匿名映射
+                           │  __mmap_new_file_vma()      file-backed（设置 vm_ops）
+                           └─ vma_iter_store_new()    插入 maple tree（用预分配节点）
+                                └─ mas_store_prealloc()
 ```
+
+**找空余地址路径**（`get_unmapped_area` 展开）：
+
+```
+get_unmapped_area()
+  └─ arch_get_unmapped_area_topdown()   ARM64 默认 top-down
+       └─ vm_unmapped_area()
+            └─ unmapped_area_topdown()  mm/vma.c
+                 └─ vma_iter_area_highest()
+                      └─ mas_empty_area_rev()   从高地址向低找第一个够大的 gap
+                           └─ mas_awalk()
+                                └─ mas_anode_descend()  利用 gap[] 跳过不够大的子树
+```
+
+关键设计：
+- `vma_iter_prealloc()` 在持锁前预分配 maple tree 节点，使 `mas_store_prealloc()` 不会因 OOM 失败
+- `mm->mm_mt` 开了 `MT_FLAGS_ALLOC_RANGE`，使用带 `gap[]` 的 `maple_arange_64` 节点，支持 O(log N) 空闲区查找
+- 能合并的 VMA 优先合并，减少 maple tree 条目数
 
 观测：运行任意程序，`cat /proc/self/maps`，对照代码理解每一行的含义。
 
