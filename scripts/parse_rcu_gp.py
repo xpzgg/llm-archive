@@ -3,7 +3,10 @@
 解析 RCU trace，按 GP 输出：
   1. gpnum + 对应的 seq (gpnum >> 2)
   2. 该 GP 需要上报 QS 的 CPU 列表（rcu_grace_period_init level=0 的 mask）
-  3. 各 CPU 上报 QS 的时间（cpuqs 事件，CPU 取 trace 行的 [N]）
+  3. 各 CPU 上报 QS 的时间，区分：
+     - natural : 通过 cpuqs 事件（CPU 主动进入静默态）
+     - FORCED  : 仅通过 rcu_quiescent_state_report（被 fqs 强制推进 —— stall 嫌疑）
+     - MISSING : trace 中完全无记录
 
 用法：
   python3 parse_rcu_gp.py trace.txt
@@ -19,6 +22,8 @@ import argparse
 TRACE_RE = re.compile(
     r'^\s*\S+\s+\[(\d+)\]\s+\S+\s+(\d+\.\d+):\s+(\w+):\s+(.*)$'
 )
+# rcu_quiescent_state_report payload: rcu_sched <gpnum> <reported_mask>>new_qsmask> ...
+QS_REPORT_RE = re.compile(r'([0-9a-f]+)>([0-9a-f]+)')
 
 
 class GP:
@@ -28,7 +33,8 @@ class GP:
         self.start_ts = None
         self.end_ts = None
         self.cpu_mask = None           # 根节点 mask（hex 字符串）
-        self.qs = {}                   # cpu -> 上报 QS 的 ts
+        self.cpuqs = {}                # cpu -> ts（自然报 QS）
+        self.qs_report = {}            # cpu -> ts（report 事件，可能被 fqs 推进）
 
     @property
     def complete(self):
@@ -41,6 +47,14 @@ class GP:
     @property
     def cpus(self):
         return mask_to_cpus(self.cpu_mask) if self.cpu_mask else []
+
+    def qs_for(self, cpu):
+        """返回 (ts, kind): kind ∈ {'natural', 'FORCED', 'MISSING'}"""
+        if cpu in self.cpuqs:
+            return self.cpuqs[cpu], 'natural'
+        if cpu in self.qs_report:
+            return self.qs_report[cpu], 'FORCED'
+        return None, 'MISSING'
 
 
 def mask_to_cpus(mask_str):
@@ -71,7 +85,7 @@ def parse(stream):
             elif action == 'end':
                 gp.end_ts = ts
             elif action == 'cpuqs':
-                gp.qs.setdefault(trace_cpu, ts)
+                gp.cpuqs.setdefault(trace_cpu, ts)
 
         # rcu_grace_period_init: rcu_sched <gpnum> <level> <grplo> <grphi> <mask>
         elif event == 'rcu_grace_period_init' and len(parts) >= 6:
@@ -79,6 +93,19 @@ def parse(stream):
             gp = gps.setdefault(gpnum, GP(gpnum))
             if level == '0' and gp.cpu_mask is None:   # 只取根节点
                 gp.cpu_mask = mask
+
+        # rcu_quiescent_state_report: rcu_sched <gpnum> <reported_mask>>new_qsmask> ...
+        # reported_mask = 这次 report 涉及到的 CPU 位掩码（叶子节点是单个 CPU，
+        # 根节点的 fqs 推进可能一次覆盖多个 CPU）
+        elif event == 'rcu_quiescent_state_report' and len(parts) >= 3:
+            gpnum = int(parts[1])
+            mt = QS_REPORT_RE.match(parts[2])
+            if mt:
+                reported_mask = int(mt.group(1), 16)
+                gp = gps.setdefault(gpnum, GP(gpnum))
+                for cpu in range(64):
+                    if reported_mask & (1 << cpu):
+                        gp.qs_report.setdefault(cpu, ts)
 
     return [gps[k] for k in sorted(gps.keys())]
 
@@ -100,12 +127,13 @@ def print_gp(gp):
     print(f"{gp.seq:>5} {gp.gpnum:>6} {gp.cpu_mask or '?':>6}  "
           f"{cpus_s:<22} {gp.dur_ms:>9.2f}")
     for cpu in gp.cpus:
-        if cpu in gp.qs:
-            t = gp.qs[cpu]
-            d = (t - gp.start_ts) * 1000
-            print(f"      CPU {cpu:>2}: QS at {t:.6f} (+{d:>7.2f} ms)")
+        ts, kind = gp.qs_for(cpu)
+        if ts is None:
+            print(f"      CPU {cpu:>2}: MISSING (no cpuqs, no report)")
         else:
-            print(f"      CPU {cpu:>2}: NO cpuqs in trace")
+            d = (ts - gp.start_ts) * 1000
+            tag = '' if kind == 'natural' else f"  {kind}"
+            print(f"      CPU {cpu:>2}: QS at {ts:.6f} (+{d:>7.2f} ms){tag}")
     print()
 
 
