@@ -20,6 +20,49 @@
 
 后续样例统一用 `rcu_sched`,实际看到什么取决于 `CONFIG_PREEMPT_RCU`。
 
+## 0.5 必需的 CONFIG
+
+源码依赖:
+
+| 配置 | 作用 | 来源 |
+|---|---|---|
+| `CONFIG_RCU_TRACE=y` | **总开关**。`include/trace/events/rcu.h:11` 把所有 `TRACE_EVENT_RCU` 展开成 `TRACE_EVENT` 还是 `TRACE_EVENT_NOP`,取决于它 | `kernel/rcu/Kconfig.debug:178` |
+| `CONFIG_DEBUG_KERNEL=y` | `RCU_TRACE` 的 `depends on`,必须先开 | `kernel/rcu/Kconfig.debug:180` |
+| `CONFIG_TREE_RCU=y` | `rcu.h:44` 的 `#if defined(CONFIG_TREE_RCU)` 把 `rcu_grace_period` / `_init` / `rcu_quiescent_state_report` / `rcu_fqs` / `rcu_preempt_task` / `rcu_unlock_preempted_task` / `rcu_stall_warning` 全包住 | `kernel/rcu/Kconfig:8`,默认 `y if SMP` |
+| `CONFIG_FTRACE=y` | tracing 基础设施(挂载 tracefs、ring buffer、event framework)。会自动 `select TRACING` → `select TRACEPOINTS` + `EVENT_TRACING` + `RING_BUFFER` + `TRACE_CLOCK` | `kernel/trace/Kconfig:204`,默认 `y if DEBUG_KERNEL` |
+
+可选:
+
+| 配置 | 作用 |
+|---|---|
+| `CONFIG_PREEMPT_RCU=y` | flavor 名变成 `rcu_preempt`;`rcu_preempt_task` / `rcu_unlock_preempted_task` 才会有实际触发 |
+| `CONFIG_RCU_NOCB_CPU=y` | 只有开了它,`rcu_nocb_wake` 事件才会有意义(定义在 `#ifdef CONFIG_RCU_NOCB_CPU` 里) |
+
+**发行版默认情况**:大多数发行版 SMP + DEBUG_KERNEL 都开,所以 `TREE_RCU`、`RCU_TRACE`、`FTRACE` 自动 `y`,直接能用。
+
+**自定义精简内核 / 没开 DEBUG_KERNEL 的情况**:
+
+```
+CONFIG_DEBUG_KERNEL=y
+CONFIG_RCU_TRACE=y
+CONFIG_FTRACE=y
+# 可选
+CONFIG_PREEMPT_RCU=y           # 想看 preempt reader 阻塞
+CONFIG_RCU_NOCB_CPU=y          # 想看 nocb 行为
+```
+
+**快速验证**:
+
+```bash
+# 内核构建时是否编译了这些事件
+zcat /proc/config.gz | grep -E 'CONFIG_(RCU_TRACE|TREE_RCU|PREEMPT_RCU|FTRACE|DEBUG_KERNEL)='
+
+# 运行时看事件是否真的存在
+ls /sys/kernel/tracing/events/rcu/
+```
+
+如果 `/sys/kernel/tracing/events/rcu/` 不存在或为空,基本就是上面某个 config 没开。
+
 ## 1. 开启方法
 
 ### 方法 A:tracefs(最直接,适合"边跑边抓")
@@ -31,6 +74,7 @@ cd /sys/kernel/debug/tracing       # 或 /sys/kernel/tracing
 echo > trace
 echo 0 > events/enable
 echo nop > current_tracer
+echo 1 > tracing_on              # 全局 ring buffer 开关,默认 1 但可能被前一个会话关过
 
 # 开关键事件
 echo 1 > events/rcu/rcu_grace_period/enable
@@ -188,7 +232,10 @@ TP_printk("%s %ld %u %d %d %lx", ...)
 - 这次 GP 开始时,把所有**叶子节点**(`level` 最高的那批)的 `qsmask` 收集起来 —— 这就是 RCU 在等的完整 CPU 集合。
 - 对每个叶子节点,`grplo` 起算 + `qsmask` 位索引 = 具体 CPU。
 - 例:叶子节点 `grplo=4 qsmask=5`(`0b0101`)= CPU 4 和 CPU 6 要报。
-- **GP 结束时还有谁的 mask 没被清零(见 2.3),谁就是元凶**。
+
+> **重要前提**:GP 不会带着未清零的 mask 结束。`tree.c:2109-2111` 里 `rcu_gp_fqs_loop()` 退出循环(进入 cleanup)的唯一条件是 `rnp->qsmask == 0 && 无 reader 阻塞`。注释(tree.c:2104-2107)进一步说明:root 节点某一位被清,仅当对应子树的所有 CPU 都报过 QS。
+>
+> 所以**"GP 一直没结束" 等价于 "还有 mask 没清零"**。元凶的判定逻辑是反过来的:不是"GP 结束后看剩什么",而是"GP 卡着时,看当前 qsmask 剩的位"—— 那些位对应的 CPU 就是没上报的元凶。GP 卡住期间 RCU 会反复 FQS + `resched_cpu()`,超过 `RCU_STALL_TIMEOUT`(默认 21s)后触发 `rcu_stall_warning`。
 
 ---
 
