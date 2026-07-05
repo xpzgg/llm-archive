@@ -1,0 +1,165 @@
+root@localhost:/mnt/emu_osu# ./test1.sh 
+[hi1630v200:15248] MCW rank 0 bound to socket 0[core 1[hwt 0]]: [../B./../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+[hi1630v200:15248] MCW rank 1 bound to socket 0[core 8[hwt 1]]: [../../../../../../../../.B/../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+iter  3994: 11.5 us
+avg 0.89 us | slow 1 / 10000
+
+=== Trace saved: /tmp/trace_162738.log ===
+总事件: 526
+pingpong 相关: 510
+
+=== pingpong sched_switch（前 30 个） ===
+        pingpong-15252   [002] d.... 19861.540573: sched_switch: prev_comm=pingpong prev_pid=15252 prev_prio=120 prev_state=R ==> next_comm=kworker/2:1 next_pid=1004 next_prio=120
+     kworker/2:1-1004    [002] d.... 19861.540582: sched_switch: prev_comm=kworker/2:1 prev_pid=1004 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15254 next_prio=120
+        pingpong-15254   [002] d.... 19861.540601: sched_switch: prev_comm=pingpong prev_pid=15254 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15252 next_prio=120
+        pingpong-15253   [017] d.... 19861.541726: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=R ==> next_comm=kworker/17:1 next_pid=1030 next_prio=120
+    kworker/17:1-1030    [017] d.... 19861.541732: sched_switch: prev_comm=kworker/17:1 prev_pid=1030 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15253 next_prio=120
+        pingpong-15252   [002] d.... 19861.542566: sched_switch: prev_comm=pingpong prev_pid=15252 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15255 next_prio=120
+        pingpong-15255   [002] d.... 19861.542593: sched_switch: prev_comm=pingpong prev_pid=15255 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19861.542663: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15252 next_prio=120
+        pingpong-15252   [002] d.... 19861.542708: sched_switch: prev_comm=pingpong prev_pid=15252 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15255 next_prio=120
+        pingpong-15255   [002] d.... 19861.542751: sched_switch: prev_comm=pingpong prev_pid=15255 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+        pingpong-15253   [017] d.... 19861.544794: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15256 next_prio=120
+        pingpong-15256   [017] d.... 19861.544816: sched_switch: prev_comm=pingpong prev_pid=15256 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15257 next_prio=120
+        pingpong-15257   [017] d.... 19861.544824: sched_switch: prev_comm=pingpong prev_pid=15257 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15253 next_prio=120
+        pingpong-15253   [017] d.... 19861.544937: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [017] d.... 19861.554053: sched_switch: prev_comm=swapper/17 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15253 next_prio=120
+        pingpong-15253   [017] d.... 19861.554119: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15257 next_prio=120
+        pingpong-15257   [017] d.... 19861.554187: sched_switch: prev_comm=pingpong prev_pid=15257 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19861.554212: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15255 next_prio=120
+        pingpong-15255   [002] d.... 19861.554243: sched_switch: prev_comm=pingpong prev_pid=15255 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15252 next_prio=120
+        pingpong-15252   [002] d.... 19861.554293: sched_switch: prev_comm=pingpong prev_pid=15252 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15255 next_prio=120
+        pingpong-15255   [002] d.... 19861.554300: sched_switch: prev_comm=pingpong prev_pid=15255 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15252 next_prio=120
+        pingpong-15252   [002] d.... 19861.554314: sched_switch: prev_comm=pingpong prev_pid=15252 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15255 next_prio=120
+        pingpong-15255   [002] d.... 19861.554358: sched_switch: prev_comm=pingpong prev_pid=15255 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [017] d.... 19861.557746: sched_switch: prev_comm=swapper/17 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15257 next_prio=120
+        pingpong-15257   [017] d.... 19861.557762: sched_switch: prev_comm=pingpong prev_pid=15257 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15253 next_prio=120
+        pingpong-15253   [017] d.... 19861.557812: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15257 next_prio=120
+        pingpong-15257   [017] d.... 19861.557818: sched_switch: prev_comm=pingpong prev_pid=15257 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15253 next_prio=120
+        pingpong-15253   [017] d.... 19861.557832: sched_switch: prev_comm=pingpong prev_pid=15253 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15257 next_prio=120
+        pingpong-15257   [017] d.... 19861.557869: sched_switch: prev_comm=pingpong prev_pid=15257 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19861.557872: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15255 next_prio=120
+root@localhost:/mnt/emu_osu# ./test1.sh 
+[hi1630v200:15281] MCW rank 0 bound to socket 0[core 1[hwt 0]]: [../B./../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+[hi1630v200:15281] MCW rank 1 bound to socket 0[core 8[hwt 1]]: [../../../../../../../../.B/../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+iter   382: 31.3 us
+iter  1721: 11.0 us
+iter  6473: 2011.3 us
+iter  7080: 2008.4 us
+iter  7948: 2004.8 us
+iter  8854: 2005.2 us
+iter  9992: 2003.7 us
+avg 2.50 us | slow 7 / 10000
+
+=== Trace saved: /tmp/trace_162756.log ===
+总事件: 506
+pingpong 相关: 488
+
+=== pingpong sched_switch（前 30 个） ===
+        pingpong-15285   [002] d.... 19879.708051: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=R ==> next_comm=kworker/2:1 next_pid=1004 next_prio=120
+     kworker/2:1-1004    [002] d.... 19879.708060: sched_switch: prev_comm=kworker/2:1 prev_pid=1004 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15287 next_prio=120
+        pingpong-15287   [002] d.... 19879.708080: sched_switch: prev_comm=pingpong prev_pid=15287 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15286   [017] d.... 19879.709730: sched_switch: prev_comm=pingpong prev_pid=15286 prev_prio=120 prev_state=R ==> next_comm=kworker/17:1 next_pid=1030 next_prio=120
+    kworker/17:1-1030    [017] d.... 19879.709736: sched_switch: prev_comm=kworker/17:1 prev_pid=1030 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15286 next_prio=120
+        pingpong-15285   [002] d.... 19879.710046: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.710071: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19879.710270: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.710333: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.710387: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+        pingpong-15286   [017] d.... 19879.712068: sched_switch: prev_comm=pingpong prev_pid=15286 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15289 next_prio=120
+        pingpong-15289   [017] d.... 19879.712092: sched_switch: prev_comm=pingpong prev_pid=15289 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15290 next_prio=120
+        pingpong-15290   [017] d.... 19879.712126: sched_switch: prev_comm=pingpong prev_pid=15290 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19879.723703: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.723733: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.723815: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.723828: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.723859: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+          <idle>-0       [017] d.... 19879.723924: sched_switch: prev_comm=swapper/17 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15286 next_prio=120
+        pingpong-15288   [002] d.... 19879.723963: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+        pingpong-15286   [017] d.... 19879.724085: sched_switch: prev_comm=pingpong prev_pid=15286 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15290 next_prio=120
+        pingpong-15290   [017] d.... 19879.724268: sched_switch: prev_comm=pingpong prev_pid=15290 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19879.729831: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.729857: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.729923: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.729929: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.729937: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.729940: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+        pingpong-15285   [002] d.... 19879.729945: sched_switch: prev_comm=pingpong prev_pid=15285 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15288 next_prio=120
+        pingpong-15288   [002] d.... 19879.729948: sched_switch: prev_comm=pingpong prev_pid=15288 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15285 next_prio=120
+
+
+
+root@localhost:/mnt/emu_osu# ./test1.sh 
+[hi1630v200:15306] MCW rank 0 bound to socket 0[core 1[hwt 0]]: [../B./../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+[hi1630v200:15306] MCW rank 1 bound to socket 0[core 8[hwt 1]]: [../../../../../../../../.B/../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../..]
+iter  1275: 28.7 us
+iter  1276: 3964.1 us
+iter  1277: 3997.4 us
+iter  1278: 3995.9 us
+iter  1279: 3996.1 us
+iter  1280: 3998.6 us
+iter  1281: 3996.5 us
+iter  1282: 4002.9 us
+iter  1283: 3995.1 us
+iter  1284: 3994.6 us
+iter  1285: 3999.2 us
+iter  1286: 3997.7 us
+iter  1287: 3999.6 us
+iter  1288: 3997.4 us
+iter  1289: 3998.2 us
+iter  1290: 3999.0 us
+iter  1291: 3996.5 us
+iter  1292: 4001.1 us
+iter  1293: 3993.9 us
+iter  1294: 3998.8 us
+iter  1295: 4000.2 us
+
+*****
+iter  3021: 3999.1 us
+iter  3022: 3999.2 us
+iter  3023: 3998.4 us
+iter  3024: 3999.9 us
+iter  3025: 3998.2 us
+iter  3026: 3999.9 us
+iter  3027: 3998.2 us
+iter  5091: 2003.3 us
+iter  7201: 2003.6 us
+iter  9270: 2003.1 us
+avg 702.03 us | slow 1756 / 10000
+
+=== Trace saved: /tmp/trace_162804.log ===
+总事件: 7620
+pingpong 相关: 7604
+
+=== pingpong sched_switch（前 30 个） ===
+        pingpong-15310   [002] d.... 19887.766718: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=R ==> next_comm=kworker/2:1 next_pid=1004 next_prio=120
+     kworker/2:1-1004    [002] d.... 19887.766724: sched_switch: prev_comm=kworker/2:1 prev_pid=1004 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15312 next_prio=120
+        pingpong-15312   [002] d.... 19887.766743: sched_switch: prev_comm=pingpong prev_pid=15312 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15310   [002] d.... 19887.768696: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.768719: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+        pingpong-15311   [017] d.... 19887.768853: sched_switch: prev_comm=pingpong prev_pid=15311 prev_prio=120 prev_state=R ==> next_comm=kworker/17:1 next_pid=1030 next_prio=120
+    kworker/17:1-1030    [017] d.... 19887.768859: sched_switch: prev_comm=kworker/17:1 prev_pid=1030 prev_prio=120 prev_state=I ==> next_comm=pingpong next_pid=15314 next_prio=120
+        pingpong-15314   [017] d.... 19887.768876: sched_switch: prev_comm=pingpong prev_pid=15314 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15311 next_prio=120
+          <idle>-0       [002] d.... 19887.768908: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15310   [002] d.... 19887.768963: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.769012: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+        pingpong-15311   [017] d.... 19887.770785: sched_switch: prev_comm=pingpong prev_pid=15311 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15315 next_prio=120
+        pingpong-15315   [017] d.... 19887.770815: sched_switch: prev_comm=pingpong prev_pid=15315 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+          <idle>-0       [017] d.... 19887.780031: sched_switch: prev_comm=swapper/17 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15311 next_prio=120
+          <idle>-0       [002] d.... 19887.780063: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.780094: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15311   [017] d.... 19887.780094: sched_switch: prev_comm=pingpong prev_pid=15311 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15315 next_prio=120
+        pingpong-15310   [002] d.... 19887.780143: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.780151: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15315   [017] d.... 19887.780162: sched_switch: prev_comm=pingpong prev_pid=15315 prev_prio=120 prev_state=S ==> next_comm=swapper/17 next_pid=0 next_prio=120
+        pingpong-15310   [002] d.... 19887.780166: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.780209: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=swapper/2 next_pid=0 next_prio=120
+          <idle>-0       [002] d.... 19887.786189: sched_switch: prev_comm=swapper/2 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15313 next_prio=120
+          <idle>-0       [017] d.... 19887.786196: sched_switch: prev_comm=swapper/17 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=pingpong next_pid=15315 next_prio=120
+        pingpong-15313   [002] d.... 19887.786263: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15315   [017] d.... 19887.786283: sched_switch: prev_comm=pingpong prev_pid=15315 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15311 next_prio=120
+        pingpong-15310   [002] d.... 19887.786358: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.786366: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+        pingpong-15310   [002] d.... 19887.786384: sched_switch: prev_comm=pingpong prev_pid=15310 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15313 next_prio=120
+        pingpong-15313   [002] d.... 19887.786388: sched_switch: prev_comm=pingpong prev_pid=15313 prev_prio=120 prev_state=S ==> next_comm=pingpong next_pid=15310 next_prio=120
+

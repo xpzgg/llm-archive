@@ -171,3 +171,18 @@ int foo_get_a(void)
 - **直接修改 RCU 保护的指针指向的对象** — 必须 alloc 新副本、拷贝、修改、发布。不能原地改，因为 reader 可能正在读
 - **认为 RCU 能处理写写互斥** — RCU 只解决读写并发，多个 writer 之间需要额外的锁（如 spinlock）来互斥
 - **以为 `synchronize_rcu()` 会等所有 reader** — 只等调用前已存在的临界区，之后新进入的不管
+
+## 构建在 RCU 之上的 utility
+
+前面讲的是 RCU 的**基础 API**。内核里还有一些**构建在 RCU 之上的封装**，针对特定场景做了优化或简化。它们本身不改变 RCU 怎么工作，只是把"用 RCU 解决某类问题"的常见模式封装成可复用的工具。
+
+| Utility | 解决什么问题 |
+|---|---|
+| **`rcu_sync`** | N 个紧密 burst 的 writer 共享一次 GP。第一个 enter 发起 GP，后续 enter 直接睡 waitqueue 蹭那次 GP。详见 [rcu_sync.md](rcu_sync.md) |
+| **`rcuwait`** | 基于 RCU 的轻量 wait queue。等对象被 RCU 释放后再唤醒等待者，比 wait_event 简单 |
+| **`get_state_synchronize_rcu()` / `poll_state_synchronize_rcu()`** | 异步 GP：拿一个 GP 序号快照，之后轮询是否完成，避免阻塞当前任务 |
+| **`call_rcu_hurry()`** | 强制不延迟的 `call_rcu`——绕过 NOCB/lazy 的延迟批处理，立即触发 GP。用于不能容忍回调延迟的场景 |
+| **`kfree_rcu()` / `kvfree_rcu()` / `call_rcu(..., kfree_rcu_cb)`** | 一行 API 完成"GP 后释放"，省得手写 kfree callback。`kfree_rcu(p, rh)` 的 `rh` 是为缓存回调结构体预留的字段 |
+| **`percpu_rw_semaphore`** | 用 rcu_sync + percpu 计数器实现的读多写少锁。reader fastpath 几乎零开销（`preempt_disable` + percpu 自增），writer 通过 rcu_sync 推 reader 进慢路后查计数器。是 rcu_sync 的主要用户 |
+
+**这组和基础 API 的关系**：基础 API（`rcu_read_lock` / `rcu_assign_pointer` / `synchronize_rcu` / `call_rcu`）是 RCU 提供的能力；这些 utility 是别人用这些能力构造的"打包方案"。如果遇到的问题恰好匹配某个 utility 的设计目的，直接用比自己用基础 API 重新组合更省事、更不容易出错。
