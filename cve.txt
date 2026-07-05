@@ -1,8 +1,0 @@
-CVE-2026-43337	drm	drm/amd/display: Fix NULL pointer dereference in dcn401_init_hw()
-CVE-2026-52904	drm	drm/nouveau: fix nvkm_device leak on aperture removal failure
-CVE-2025-71315	drm	drm/vkms: Convert to DRM's vblank timer
-CVE-2026-46276	drm	drm/amdgpu: fix zero-size GDS range init on RDNA4
-CVE-2026-46278	drm	drm/imagination: Fix segfault when updating ftrace mask
-CVE-2026-46309	drm	drm/xe/uapi: Reject coh_none PAT index for CPU cached memory in madvise
-CVE-2026-46311	drm	drm/amdgpu/userq: fix access to stale wptr mapping
-CVE-2026-46314	drm	drm/v3d: Reject empty multisync extension to prevent infinite loop
