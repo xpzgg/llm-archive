@@ -1,0 +1,97 @@
+From b618c38b9d9a644dbb25765d4597ae33509a23a3 Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Mon, 6 Jul 2026 07:11:38 -0700
+Subject: [PATCH 2/2] arm64: add CPU offline hotplug timing logs
+
+Add CPU offline timing logs to split the hotplug shutdown path into observable timestamps:
+
+  D0: _cpu_down() starts on the control CPU
+
+  D1: the target CPU is about to invoke PSCI cpu_off
+
+  D2: the control CPU observes AFFINITY_INFO == OFF
+
+  D3: _cpu_down() finishes on the control CPU
+
+Interpretation:
+
+  kernel shutdown work before PSCI cpu_off ~= D1 - D0
+
+  firmware/BIOS CPU_OFF time ~= D2 - D1
+
+  kernel cleanup after OFF observation ~= D3 - D2
+
+  total offline time = D3 - D0
+
+D1 is printed directly before PSCI cpu_off on the dying CPU for clarity. D2-D1 therefore includes that printk cost and AFFINITY_INFO polling granularity, because PSCI CPU_OFF does not return on success.
+---
+ arch/arm64/kernel/psci.c | 9 ++++++++-
+ kernel/cpu.c             | 7 +++++++
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kernel/psci.c b/arch/arm64/kernel/psci.c
+index 2757f2d3fb05..56ac9cd1af44 100644
+--- a/arch/arm64/kernel/psci.c
++++ b/arch/arm64/kernel/psci.c
+@@ -89,7 +89,10 @@ static void cpu_psci_cpu_die(unsigned int cpu)
+ 	 */
+ 	u32 state = PSCI_POWER_STATE_TYPE_POWER_DOWN <<
+ 		    PSCI_0_2_POWER_STATE_TYPE_SHIFT;
++	u64 start = ktime_get_ns();
+ 
++	pr_info("CPU%d hotplug offline D1 psci cpu_off enter ns=%llu\n",
++		cpu, start);
+ 	psci_ops.cpu_off(state);
+ }
+ 
+@@ -97,6 +100,7 @@ static int cpu_psci_cpu_kill(unsigned int cpu)
+ {
+ 	int err;
+ 	unsigned long start, end;
++	u64 kill_start_ns, off_seen_ns;
+ 
+ 	if (!psci_ops.affinity_info)
+ 		return 0;
+@@ -108,10 +112,13 @@ static int cpu_psci_cpu_kill(unsigned int cpu)
+ 
+ 	start = jiffies;
+ 	end = start + msecs_to_jiffies(100);
++	kill_start_ns = ktime_get_ns();
+ 	do {
+ 		err = psci_ops.affinity_info(cpu_logical_map(cpu), 0);
+ 		if (err == PSCI_0_2_AFFINITY_LEVEL_OFF) {
+-			pr_info("CPU%d killed (polled %d ms)\n", cpu,
++			off_seen_ns = ktime_get_ns();
++			pr_info("CPU%d hotplug offline D2 affinity_off ns=%llu kill_wait_ns=%llu poll_ms=%d\n",
++				cpu, off_seen_ns, off_seen_ns - kill_start_ns,
+ 				jiffies_to_msecs(jiffies - start));
+ 			return 0;
+ 		}
+diff --git a/kernel/cpu.c b/kernel/cpu.c
+index 98f9b2cfa741..ce761a5b8963 100644
+--- a/kernel/cpu.c
++++ b/kernel/cpu.c
+@@ -1388,6 +1388,8 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
+ 			   enum cpuhp_state target)
+ {
+ 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
++	u64 start_ns = ktime_get_ns();
++	u64 end_ns;
+ 	int prev_state, ret = 0;
+ 
+ 	if (num_online_cpus() == 1)
+@@ -1446,6 +1448,11 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen,
+ 	 */
+ 	lockup_detector_cleanup();
+ 	arch_smt_update();
++	end_ns = ktime_get_ns();
++	pr_info("CPU%u hotplug offline D0 _cpu_down start ns=%llu\n",
++		cpu, start_ns);
++	pr_info("CPU%u hotplug offline D3 _cpu_down end ns=%llu ret=%d delta_ns=%llu\n",
++		cpu, end_ns, ret, end_ns - start_ns);
+ 	return ret;
+ }
+ 
+-- 
+2.34.1
+

@@ -86,11 +86,14 @@ class GP:
 
     def qs_for(self, cpu):
         """返回 (ts, kind): kind ∈ {'natural', 'FORCED', 'MISSING'}"""
+        candidates = []
         if cpu in self.cpuqs:
-            return self.cpuqs[cpu], 'natural'
+            candidates.append((self.cpuqs[cpu], 'natural'))
         if cpu in self.qs_report:
-            return self.qs_report[cpu], 'FORCED'
-        return None, 'MISSING'
+            candidates.append((self.qs_report[cpu], 'FORCED'))
+        if not candidates:
+            return None, 'MISSING'
+        return min(candidates, key=lambda item: item[0])
 
     @property
     def max_hotplug_delay_ms(self):
@@ -192,16 +195,17 @@ def parse(stream):
     # 关联 hotplug：对每个 GP，如果 mask 中的某 CPU 第一次出现在 GP 期间
     # （start 之后、end 之前 + 容差），就认为该 GP 受 hotplug 影响
     TOLERANCE_S = 0.001   # 1ms 容差，避免边界 trace 错位
-    for gp in gps.values():
-        if not gp.complete:
-            continue
-        for cpu in gp.cpus:
-            fs = cpu_first_seen.get(cpu)
-            if fs is None:
+    if cpuonl_events:
+        for gp in gps.values():
+            if not gp.complete:
                 continue
-            if gp.start_ts <= fs <= gp.end_ts + TOLERANCE_S:
-                delay_ms = (fs - gp.start_ts) * 1000
-                gp.hotplug[cpu] = (fs, delay_ms)
+            for cpu in gp.cpus:
+                fs = cpu_first_seen.get(cpu)
+                if fs is None:
+                    continue
+                if gp.start_ts <= fs <= gp.end_ts + TOLERANCE_S:
+                    delay_ms = (fs - gp.start_ts) * 1000
+                    gp.hotplug[cpu] = (fs, delay_ms)
 
     return [gps[k] for k in sorted(gps.keys())], cpu_first_seen, cpuonl_events
 
@@ -222,7 +226,12 @@ def print_gp(gp):
     cpus_s = ','.join(map(str, gp.cpus)) or '?'
     hp_tag = f"  HOTPLUG(+{gp.max_hotplug_delay_ms:.1f}ms)" if gp.hotplug else ""
     print(f"{gp.seq:>5} {gp.gpnum:>6}  {cpus_s:<32} {gp.dur_ms:>9.2f}{hp_tag}")
-    for cpu in gp.cpus:
+
+    def qs_sort_key(cpu):
+        ts, _ = gp.qs_for(cpu)
+        return (ts is None, ts if ts is not None else 0, cpu)
+
+    for cpu in sorted(gp.cpus, key=qs_sort_key):
         ts, kind = gp.qs_for(cpu)
         if ts is None:
             print(f"      CPU {cpu:>2}: MISSING (no cpuqs, no report)")
