@@ -1,0 +1,401 @@
+       rcu_sched-16      [022] d.... 77670.790458: rcu_grace_period: rcu_sched 4856849 start
+       rcu_sched-16      [022] d.... 77670.790463: rcu_grace_period_init: rcu_sched 4856849 0 0 383 3f
+       rcu_sched-16      [022] d.... 77670.790463: rcu_grace_period_init: rcu_sched 4856849 1 0 15 ffff
+       rcu_sched-16      [022] d.... 77670.790463: rcu_grace_period: rcu_sched 4856849 cpustart
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 16 31 ffff
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 32 47 ffff
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 48 63 ffff
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 64 79 ffff
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 80 95 ffff
+       rcu_sched-16      [022] d.... 77670.790464: rcu_grace_period_init: rcu_sched 4856849 1 96 111 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 112 127 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 128 143 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 144 159 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 160 175 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 176 191 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 192 207 0
+       rcu_sched-16      [022] d.... 77670.790465: rcu_grace_period_init: rcu_sched 4856849 1 208 223 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 224 239 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 240 255 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 256 271 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 272 287 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 288 303 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 304 319 0
+       rcu_sched-16      [022] d.... 77670.790466: rcu_grace_period_init: rcu_sched 4856849 1 320 335 0
+       rcu_sched-16      [022] d.... 77670.790467: rcu_grace_period_init: rcu_sched 4856849 1 336 351 0
+       rcu_sched-16      [022] d.... 77670.790467: rcu_grace_period_init: rcu_sched 4856849 1 352 367 0
+       rcu_sched-16      [022] d.... 77670.790467: rcu_grace_period_init: rcu_sched 4856849 1 368 383 0
+       rcu_sched-16      [022] ..... 77670.790467: rcu_grace_period: rcu_sched 4856849 fqswait
+       rcu_sched-16      [022] d.... 77670.790468: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [014] d.s.. 77670.790471: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [020] d.s.. 77670.790471: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [015] d.s.. 77670.790474: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [016] d.s.. 77670.790476: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [017] d.s.. 77670.790478: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [026] d.s.. 77670.790490: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [027] d.s.. 77670.790493: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [052] d.s.. 77670.790711: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [031] d.s.. 77670.790893: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [033] d.s.. 77670.791040: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [029] d.s.. 77670.791142: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [060] d.s.. 77670.791286: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [040] d.s.. 77670.791321: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [067] d.s.. 77670.791393: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [069] d.s.. 77670.791402: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [049] d.s.. 77670.791421: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [065] d.s.. 77670.791434: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [043] d.s.. 77670.791534: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [087] d.s.. 77670.791594: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [035] d.s.. 77670.791653: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [085] d.s.. 77670.791689: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [094] d.s.. 77670.791717: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [057] d.s.. 77670.791762: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [039] d.s.. 77670.791815: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [047] d.s.. 77670.791820: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [044] d.s.. 77670.791864: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [079] d.s.. 77670.791876: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [090] d.s.. 77670.791894: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [072] d.s.. 77670.791914: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [080] d.s.. 77670.791954: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [055] d.s.. 77670.792009: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [060] dN... 77670.792069: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [033] dN... 77670.792095: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [093] d.s.. 77670.792145: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [063] d.s.. 77670.792147: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [089] d.s.. 77670.792199: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [088] dNs.. 77670.792204: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [088] dN... 77670.792205: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [077] d.s.. 77670.792206: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [059] d.s.. 77670.792226: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [050] d.s.. 77670.794110: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [075] d.s.. 77670.794110: rcu_grace_period: rcu_sched 4856849 cpustart
+             cat-26199   [082] d.s.. 77670.794112: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [060] d.s.. 77670.794125: rcu_quiescent_state_report: rcu_sched 4856849 1000>efff 1 48 63 0
+          <idle>-0       [051] d.s.. 77670.794201: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [061] d.s.. 77670.794211: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [083] d.s.. 77670.794213: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [075] dN... 77670.794271: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [000] dNs.. 77670.794283: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [004] d.s.. 77670.794285: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [000] dN... 77670.794285: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [005] d.s.. 77670.794315: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [001] d.s.. 77670.794326: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [002] d.s.. 77670.794365: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [008] d.s.. 77670.794380: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [034] d.s.. 77670.794387: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [012] d.s.. 77670.794391: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [032] d.s.. 77670.794395: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [013] d.s.. 77670.794396: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [009] d.s.. 77670.794397: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [006] d.s.. 77670.794405: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [033] d.s.. 77670.794418: rcu_quiescent_state_report: rcu_sched 4856849 2>fffd 1 32 47 0
+          <idle>-0       [028] d.s.. 77670.794419: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [038] d.s.. 77670.794422: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [021] d.s.. 77670.794437: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [003] d.s.. 77670.794438: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [011] d.s.. 77670.794461: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [007] d.s.. 77670.794464: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [024] d.s.. 77670.794493: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [018] d.s.. 77670.794499: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [050] dN... 77670.794541: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [030] d.s.. 77670.794817: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [056] d.s.. 77670.794928: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [048] d.s.. 77670.794973: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [042] d.s.. 77670.795006: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [053] d.s.. 77670.795009: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [076] d.s.. 77670.795019: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [023] d.s.. 77670.795038: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [022] d.s.. 77670.795039: rcu_quiescent_state_report: rcu_sched 4856849 40>ffbf 1 16 31 0
+          <idle>-0       [041] d.s.. 77670.795061: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [045] d.s.. 77670.795109: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [008] dN... 77670.795147: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [078] d.s.. 77670.795383: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [058] d.s.. 77670.795439: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [037] d.s.. 77670.795477: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [064] d.s.. 77670.795606: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [046] d.s.. 77670.795619: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [091] d.s.. 77670.795630: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [066] d.s.. 77670.795695: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [062] d.s.. 77670.795701: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [068] d.s.. 77670.795751: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [095] d.s.. 77670.795761: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [092] d.s.. 77670.795765: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [081] d.s.. 77670.795784: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [084] d.s.. 77670.795847: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [086] d.s.. 77670.795864: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [054] d.s.. 77670.795898: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [088] d.s.. 77670.795912: rcu_quiescent_state_report: rcu_sched 4856849 100>feff 1 80 95 0
+          <idle>-0       [073] d.s.. 77670.795998: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [070] d.s.. 77670.796048: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [004] dN... 77670.796517: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [048] dN... 77670.797547: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [062] dN... 77670.797711: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [057] dN... 77670.797743: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [049] dN... 77670.797821: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [054] dN... 77670.797886: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [052] dN... 77670.797993: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [050] d.s.. 77670.798111: rcu_quiescent_state_report: rcu_sched 4856849 4>effb 1 48 63 0
+          <idle>-0       [074] d.s.. 77670.798111: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [075] dNs.. 77670.798112: rcu_quiescent_state_report: rcu_sched 4856849 800>f7ff 1 64 79 0
+          <idle>-0       [010] d.s.. 77670.798114: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [052] d.s.. 77670.798115: rcu_quiescent_state_report: rcu_sched 4856849 10>efeb 1 48 63 0
+          <idle>-0       [057] d.s.. 77670.798115: rcu_quiescent_state_report: rcu_sched 4856849 200>edeb 1 48 63 0
+          <idle>-0       [062] d.s.. 77670.798116: rcu_quiescent_state_report: rcu_sched 4856849 4000>adeb 1 48 63 0
+          <idle>-0       [049] d.s.. 77670.798116: rcu_quiescent_state_report: rcu_sched 4856849 2>ade9 1 48 63 0
+          <idle>-0       [008] d.s.. 77670.798116: rcu_quiescent_state_report: rcu_sched 4856849 100>feff 1 0 15 0
+          <idle>-0       [054] d.s.. 77670.798117: rcu_quiescent_state_report: rcu_sched 4856849 40>ada9 1 48 63 0
+          <idle>-0       [048] d.s.. 77670.798117: rcu_quiescent_state_report: rcu_sched 4856849 1>ada8 1 48 63 0
+          <idle>-0       [000] d.s.. 77670.798125: rcu_quiescent_state_report: rcu_sched 4856849 1>fefe 1 0 15 0
+          <idle>-0       [004] d.s.. 77670.798333: rcu_quiescent_state_report: rcu_sched 4856849 10>feee 1 0 15 0
+          <idle>-0       [074] dN... 77670.798533: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [002] dN... 77670.798722: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [019] d.s.. 77670.798772: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [025] d.s.. 77670.799099: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [001] dN... 77670.799180: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [071] d.s.. 77670.799222: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [036] d.s.. 77670.799939: rcu_grace_period: rcu_sched 4856849 cpustart
+          <idle>-0       [005] dN... 77670.800324: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [012] dN... 77670.800817: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [007] dN... 77670.800965: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [074] d.s.. 77670.802110: rcu_quiescent_state_report: rcu_sched 4856849 400>f3ff 1 64 79 0
+          <idle>-0       [001] d.s.. 77670.802113: rcu_quiescent_state_report: rcu_sched 4856849 2>feec 1 0 15 0
+          <idle>-0       [005] d.s.. 77670.802324: rcu_quiescent_state_report: rcu_sched 4856849 20>fecc 1 0 15 0
+          <idle>-0       [002] d.s.. 77670.802341: rcu_quiescent_state_report: rcu_sched 4856849 4>fec8 1 0 15 0
+          <idle>-0       [007] d.s.. 77670.802397: rcu_quiescent_state_report: rcu_sched 4856849 80>fe48 1 0 15 0
+       rcu_sched-16      [022] ..... 77670.802399: rcu_grace_period: rcu_sched 4856849 fqsstart
+       rcu_sched-16      [022] d.... 77670.802400: rcu_fqs: rcu_sched 4856849 6 dti
+       rcu_sched-16      [022] d.... 77670.802400: rcu_fqs: rcu_sched 4856849 9 dti
+       rcu_sched-16      [022] d.... 77670.802401: rcu_fqs: rcu_sched 4856849 10 dti
+       rcu_sched-16      [022] d.... 77670.802401: rcu_fqs: rcu_sched 4856849 11 dti
+       rcu_sched-16      [022] d.... 77670.802402: rcu_fqs: rcu_sched 4856849 12 dti
+       rcu_sched-16      [022] d.... 77670.802402: rcu_fqs: rcu_sched 4856849 13 dti
+       rcu_sched-16      [022] d.... 77670.802402: rcu_fqs: rcu_sched 4856849 14 dti
+       rcu_sched-16      [022] d.... 77670.802403: rcu_fqs: rcu_sched 4856849 15 dti
+       rcu_sched-16      [022] d.... 77670.802404: rcu_quiescent_state_report: rcu_sched 4856849 fe40>8 1 0 15 0
+       rcu_sched-16      [022] d.... 77670.802404: rcu_fqs: rcu_sched 4856849 16 dti
+       rcu_sched-16      [022] d.... 77670.802404: rcu_fqs: rcu_sched 4856849 17 dti
+       rcu_sched-16      [022] d.... 77670.802405: rcu_fqs: rcu_sched 4856849 19 dti
+       rcu_sched-16      [022] d.... 77670.802405: rcu_fqs: rcu_sched 4856849 21 dti
+       rcu_sched-16      [022] d.... 77670.802405: rcu_fqs: rcu_sched 4856849 23 dti
+       rcu_sched-16      [022] d.... 77670.802406: rcu_fqs: rcu_sched 4856849 24 dti
+       rcu_sched-16      [022] d.... 77670.802406: rcu_fqs: rcu_sched 4856849 25 dti
+       rcu_sched-16      [022] d.... 77670.802406: rcu_fqs: rcu_sched 4856849 26 dti
+       rcu_sched-16      [022] d.... 77670.802407: rcu_fqs: rcu_sched 4856849 28 dti
+       rcu_sched-16      [022] d.... 77670.802407: rcu_fqs: rcu_sched 4856849 29 dti
+       rcu_sched-16      [022] d.... 77670.802407: rcu_fqs: rcu_sched 4856849 30 dti
+       rcu_sched-16      [022] d.... 77670.802407: rcu_fqs: rcu_sched 4856849 31 dti
+       rcu_sched-16      [022] d.... 77670.802408: rcu_quiescent_state_report: rcu_sched 4856849 f7ab>814 1 16 31 0
+       rcu_sched-16      [022] d.... 77670.802409: rcu_fqs: rcu_sched 4856849 32 dti
+       rcu_sched-16      [022] d.... 77670.802409: rcu_fqs: rcu_sched 4856849 34 dti
+       rcu_sched-16      [022] d.... 77670.802409: rcu_fqs: rcu_sched 4856849 35 dti
+       rcu_sched-16      [022] d.... 77670.802410: rcu_fqs: rcu_sched 4856849 36 dti
+       rcu_sched-16      [022] d.... 77670.802410: rcu_fqs: rcu_sched 4856849 37 dti
+       rcu_sched-16      [022] d.... 77670.802411: rcu_fqs: rcu_sched 4856849 38 dti
+       rcu_sched-16      [022] d.... 77670.802411: rcu_fqs: rcu_sched 4856849 39 dti
+       rcu_sched-16      [022] d.... 77670.802412: rcu_fqs: rcu_sched 4856849 40 dti
+       rcu_sched-16      [022] d.... 77670.802412: rcu_fqs: rcu_sched 4856849 41 dti
+       rcu_sched-16      [022] d.... 77670.802413: rcu_fqs: rcu_sched 4856849 42 dti
+       rcu_sched-16      [022] d.... 77670.802413: rcu_fqs: rcu_sched 4856849 43 dti
+       rcu_sched-16      [022] d.... 77670.802414: rcu_fqs: rcu_sched 4856849 44 dti
+       rcu_sched-16      [022] d.... 77670.802414: rcu_fqs: rcu_sched 4856849 45 dti
+       rcu_sched-16      [022] d.... 77670.802414: rcu_fqs: rcu_sched 4856849 46 dti
+       rcu_sched-16      [022] d.... 77670.802415: rcu_fqs: rcu_sched 4856849 47 dti
+       rcu_sched-16      [022] d.... 77670.802415: rcu_quiescent_state_report: rcu_sched 4856849 fffd>0 1 32 47 0
+       rcu_sched-16      [022] d.... 77670.802416: rcu_quiescent_state_report: rcu_sched 4856849 4>3b 0 0 383 0
+       rcu_sched-16      [022] d.... 77670.802416: rcu_fqs: rcu_sched 4856849 51 dti
+       rcu_sched-16      [022] d.... 77670.802417: rcu_fqs: rcu_sched 4856849 53 dti
+       rcu_sched-16      [022] d.... 77670.802417: rcu_fqs: rcu_sched 4856849 55 dti
+       rcu_sched-16      [022] d.... 77670.802417: rcu_fqs: rcu_sched 4856849 56 dti
+       rcu_sched-16      [022] d.... 77670.802418: rcu_fqs: rcu_sched 4856849 58 dti
+       rcu_sched-16      [022] d.... 77670.802418: rcu_fqs: rcu_sched 4856849 59 dti
+       rcu_sched-16      [022] d.... 77670.802418: rcu_fqs: rcu_sched 4856849 61 dti
+       rcu_sched-16      [022] d.... 77670.802419: rcu_fqs: rcu_sched 4856849 63 dti
+       rcu_sched-16      [022] d.... 77670.802419: rcu_quiescent_state_report: rcu_sched 4856849 ada8>0 1 48 63 0
+       rcu_sched-16      [022] d.... 77670.802419: rcu_quiescent_state_report: rcu_sched 4856849 8>33 0 0 383 0
+       rcu_sched-16      [022] d.... 77670.802420: rcu_fqs: rcu_sched 4856849 64 dti
+       rcu_sched-16      [022] d.... 77670.802420: rcu_fqs: rcu_sched 4856849 65 dti
+       rcu_sched-16      [022] d.... 77670.802421: rcu_fqs: rcu_sched 4856849 66 dti
+       rcu_sched-16      [022] d.... 77670.802421: rcu_fqs: rcu_sched 4856849 67 dti
+       rcu_sched-16      [022] d.... 77670.802421: rcu_fqs: rcu_sched 4856849 68 dti
+       rcu_sched-16      [022] d.... 77670.802422: rcu_fqs: rcu_sched 4856849 69 dti
+       rcu_sched-16      [022] d.... 77670.802422: rcu_fqs: rcu_sched 4856849 70 dti
+       rcu_sched-16      [022] d.... 77670.802422: rcu_fqs: rcu_sched 4856849 71 dti
+       rcu_sched-16      [022] d.... 77670.802423: rcu_fqs: rcu_sched 4856849 72 dti
+       rcu_sched-16      [022] d.... 77670.802423: rcu_fqs: rcu_sched 4856849 73 dti
+       rcu_sched-16      [022] d.... 77670.802423: rcu_fqs: rcu_sched 4856849 76 dti
+       rcu_sched-16      [022] d.... 77670.802424: rcu_fqs: rcu_sched 4856849 77 dti
+       rcu_sched-16      [022] d.... 77670.802424: rcu_fqs: rcu_sched 4856849 78 dti
+       rcu_sched-16      [022] d.... 77670.802424: rcu_fqs: rcu_sched 4856849 79 dti
+       rcu_sched-16      [022] d.... 77670.802424: rcu_quiescent_state_report: rcu_sched 4856849 f3ff>0 1 64 79 0
+       rcu_sched-16      [022] d.... 77670.802425: rcu_quiescent_state_report: rcu_sched 4856849 10>23 0 0 383 0
+       rcu_sched-16      [022] d.... 77670.802425: rcu_fqs: rcu_sched 4856849 80 dti
+       rcu_sched-16      [022] d.... 77670.802425: rcu_fqs: rcu_sched 4856849 81 dti
+       rcu_sched-16      [022] d.... 77670.802426: rcu_fqs: rcu_sched 4856849 83 dti
+       rcu_sched-16      [022] d.... 77670.802427: rcu_fqs: rcu_sched 4856849 84 dti
+       rcu_sched-16      [022] d.... 77670.802427: rcu_fqs: rcu_sched 4856849 85 dti
+       rcu_sched-16      [022] d.... 77670.802427: rcu_fqs: rcu_sched 4856849 86 dti
+       rcu_sched-16      [022] d.... 77670.802427: rcu_fqs: rcu_sched 4856849 87 dti
+       rcu_sched-16      [022] d.... 77670.802428: rcu_fqs: rcu_sched 4856849 89 dti
+       rcu_sched-16      [022] d.... 77670.802428: rcu_fqs: rcu_sched 4856849 90 dti
+       rcu_sched-16      [022] d.... 77670.802428: rcu_fqs: rcu_sched 4856849 91 dti
+       rcu_sched-16      [022] d.... 77670.802429: rcu_fqs: rcu_sched 4856849 92 dti
+       rcu_sched-16      [022] d.... 77670.802429: rcu_fqs: rcu_sched 4856849 93 dti
+       rcu_sched-16      [022] d.... 77670.802429: rcu_fqs: rcu_sched 4856849 94 dti
+       rcu_sched-16      [022] d.... 77670.802430: rcu_fqs: rcu_sched 4856849 95 dti
+       rcu_sched-16      [022] d.... 77670.802430: rcu_quiescent_state_report: rcu_sched 4856849 fefb>4 1 80 95 0
+       rcu_sched-16      [022] ..... 77670.802432: rcu_grace_period: rcu_sched 4856849 fqsend
+       rcu_sched-16      [022] ..... 77670.802432: rcu_grace_period: rcu_sched 4856849 fqswait
+          <idle>-0       [013] dN... 77670.802468: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [032] dN... 77670.802660: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [010] dN... 77670.804433: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [076] dN... 77670.805206: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [078] dN... 77670.805374: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [014] dN... 77670.805766: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [073] dN... 77670.806205: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [017] dN... 77670.807798: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [065] dN... 77670.808442: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [068] dN... 77670.808631: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [071] dN... 77670.808631: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [077] dN... 77670.808921: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [009] dN... 77670.810095: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [066] dN... 77670.810158: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [070] dN... 77670.814267: rcu_grace_period: rcu_sched 4856849 cpuqs
+       rcu_sched-16      [022] ..... 77670.815311: rcu_grace_period: rcu_sched 4856849 fqsstart
+       rcu_sched-16      [022] d.... 77670.815313: rcu_fqs: rcu_sched 4856849 3 dti
+       rcu_sched-16      [022] d.... 77670.815313: rcu_quiescent_state_report: rcu_sched 4856849 8>0 1 0 15 0
+       rcu_sched-16      [022] d.... 77670.815313: rcu_quiescent_state_report: rcu_sched 4856849 1>22 0 0 383 0
+       rcu_sched-16      [022] d.... 77670.815314: rcu_fqs: rcu_sched 4856849 18 dti
+       rcu_sched-16      [022] d.... 77670.815314: rcu_fqs: rcu_sched 4856849 20 dti
+       rcu_sched-16      [022] d.... 77670.815314: rcu_fqs: rcu_sched 4856849 27 dti
+       rcu_sched-16      [022] d.... 77670.815314: rcu_quiescent_state_report: rcu_sched 4856849 814>0 1 16 31 0
+       rcu_sched-16      [022] d.... 77670.815315: rcu_quiescent_state_report: rcu_sched 4856849 2>20 0 0 383 0
+       rcu_sched-16      [022] ..... 77670.815318: rcu_grace_period: rcu_sched 4856849 fqsend
+       rcu_sched-16      [022] ..... 77670.815318: rcu_grace_period: rcu_sched 4856849 fqswait
+          <idle>-0       [086] dN... 77670.823259: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [036] dN... 77670.823708: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [085] dN... 77670.823716: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [026] dN... 77670.825017: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [030] dN... 77670.825166: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [072] dN... 77670.825328: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [021] dN... 77670.825685: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [027] dN... 77670.825783: rcu_grace_period: rcu_sched 4856849 cpuqs
+       rcu_sched-16      [022] ..... 77670.826911: rcu_grace_period: rcu_sched 4856849 fqsstart
+       rcu_sched-16      [022] ..... 77670.826915: rcu_grace_period: rcu_sched 4856849 fqsend
+       rcu_sched-16      [022] ..... 77670.826915: rcu_grace_period: rcu_sched 4856849 fqswait
+          <idle>-0       [067] dN... 77670.831997: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [069] dN... 77670.832144: rcu_grace_period: rcu_sched 4856849 cpuqs
+       rcu_sched-16      [022] ..... 77670.838669: rcu_grace_period: rcu_sched 4856849 fqsstart
+       rcu_sched-16      [022] ..... 77670.838674: rcu_grace_period: rcu_sched 4856849 fqsend
+       rcu_sched-16      [022] ..... 77670.838674: rcu_grace_period: rcu_sched 4856849 fqswait
+          <idle>-0       [003] dN... 77670.840980: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [058] dN... 77670.844183: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [038] dN... 77670.847528: rcu_grace_period: rcu_sched 4856849 cpuqs
+       rcu_sched-16      [022] ..... 77670.850449: rcu_grace_period: rcu_sched 4856849 fqsstart
+       rcu_sched-16      [022] ..... 77670.850453: rcu_grace_period: rcu_sched 4856849 fqsend
+       rcu_sched-16      [022] ..... 77670.850454: rcu_grace_period: rcu_sched 4856849 fqswait
+             cat-26199   [082] d.... 77670.851138: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [080] dN... 77670.852318: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [056] dN... 77670.852477: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [084] dN... 77670.853855: rcu_grace_period: rcu_sched 4856849 cpuqs
+             cat-26199   [082] d.s.. 77670.854115: rcu_quiescent_state_report: rcu_sched 4856849 4>0 1 80 95 0
+             cat-26199   [082] d.s.. 77670.854115: rcu_quiescent_state_report: rcu_sched 4856849 20>0 0 0 383 0
+          <idle>-0       [024] dN... 77670.854636: rcu_grace_period: rcu_sched 4856849 cpuqs
+       rcu_sched-16      [022] d.... 77670.854837: rcu_grace_period: rcu_sched 4856849 cpuend
+       rcu_sched-16      [022] d.... 77670.854843: rcu_grace_period: rcu_sched 4856849 end
+          <idle>-0       [071] d.s.. 77670.854872: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [045] d.s.. 77670.854885: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [044] d.s.. 77670.854889: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [029] d.s.. 77670.855009: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [053] d.s.. 77670.855098: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [026] d.s.. 77670.855158: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [086] dNs.. 77670.855236: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [061] d.s.. 77670.855318: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [039] d.s.. 77670.855475: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [030] d.s.. 77670.855647: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [036] d.s.. 77670.855780: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [047] d.s.. 77670.855870: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [041] d.s.. 77670.855948: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [072] d.s.. 77670.855956: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [042] d.s.. 77670.855969: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [077] d.s.. 77670.855996: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [064] d.s.. 77670.856045: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [066] d.s.. 77670.856069: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [035] d.s.. 77670.856071: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [078] d.s.. 77670.856198: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [094] d.s.. 77670.856256: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [069] d.s.. 77670.856280: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [033] d.s.. 77670.856286: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [091] d.s.. 77670.856360: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [092] d.s.. 77670.856367: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [088] d.s.. 77670.856372: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [075] d.s.. 77670.858110: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [074] dNs.. 77670.858111: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [050] d.s.. 77670.858112: rcu_grace_period: rcu_sched 4856849 cpuend
+             cat-26199   [084] d.s.. 77670.858114: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [062] d.s.. 77670.858114: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [000] d.s.. 77670.858126: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [002] dNs.. 77670.858158: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [001] d.s.. 77670.858198: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [003] d.s.. 77670.858203: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [051] d.s.. 77670.858213: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [063] d.s.. 77670.858218: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [085] d.s.. 77670.858222: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [004] d.s.. 77670.858303: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [008] d.s.. 77670.858328: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [009] d.s.. 77670.858354: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [011] d.s.. 77670.858357: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [012] d.s.. 77670.858365: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [006] d.s.. 77670.858368: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [005] d.s.. 77670.858371: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [007] d.s.. 77670.858395: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [018] d.s.. 77670.858403: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [019] d.s.. 77670.858408: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [032] d.s.. 77670.858432: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [027] d.s.. 77670.858433: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [020] d.s.. 77670.858439: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [024] d.s.. 77670.858444: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [025] d.s.. 77670.858447: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [014] dNs.. 77670.858460: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [017] d.s.. 77670.858477: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [049] d.s.. 77670.858553: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [031] d.s.. 77670.858698: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [023] d.s.. 77670.858722: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [037] d.s.. 77670.858738: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [038] d.s.. 77670.858898: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [068] d.s.. 77670.858947: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [060] d.s.. 77670.858978: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [083] d.s.. 77670.859119: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [082] d.s.. 77670.859120: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [067] d.s.. 77670.859222: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [065] d.s.. 77670.859349: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [034] d.s.. 77670.859565: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [081] d.s.. 77670.859570: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [028] d.s.. 77670.859646: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [055] d.s.. 77670.859722: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [052] d.s.. 77670.859741: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [076] d.s.. 77670.859757: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [056] d.s.. 77670.859761: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [089] d.s.. 77670.859771: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [057] d.s.. 77670.859792: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [046] d.s.. 77670.859845: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [070] d.s.. 77670.859912: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [087] d.s.. 77670.859937: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [073] d.s.. 77670.859963: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [079] d.s.. 77670.859986: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [059] d.s.. 77670.860024: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [040] d.s.. 77670.860050: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [043] d.s.. 77670.860118: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [093] d.s.. 77670.860147: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [090] d.s.. 77670.860300: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [095] d.s.. 77670.860311: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [015] dN... 77670.861883: rcu_grace_period: rcu_sched 4856849 cpuqs
+          <idle>-0       [015] d.s.. 77670.862114: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [013] d.s.. 77670.862433: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [010] d.s.. 77670.862448: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [021] d.s.. 77670.862485: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [016] d.s.. 77670.862794: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [058] d.s.. 77670.863486: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [080] d.s.. 77670.863682: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [048] d.s.. 77670.863710: rcu_grace_period: rcu_sched 4856849 cpuend
+          <idle>-0       [054] d.s.. 77670.863936: rcu_grace_period: rcu_sched 4856849 cpuend
+

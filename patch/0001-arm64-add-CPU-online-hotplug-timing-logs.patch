@@ -1,0 +1,140 @@
+From 247b4e7a3191f19a6e663384f1cb339b57314fcd Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Mon, 6 Jul 2026 06:57:01 -0700
+Subject: [PATCH 1/2] arm64: add CPU online hotplug timing logs
+
+Add temporary CPU online timing logs to split the hotplug path into five timestamps:
+
+  T0: _cpu_up() starts on the control CPU
+
+  T1: PSCI cpu_on is invoked
+
+  T2: PSCI cpu_on returns
+
+  T3: the target CPU reaches secondary_start_kernel()
+
+  T4: _cpu_up() finishes on the control CPU
+
+Interpretation:
+
+  kernel pre-work      = T1 - T0
+
+  PSCI call latency    = T2 - T1
+
+  firmware bringup     ~= T3 - T2
+
+  kernel post-work     = T4 - T3
+
+  total kernel time    ~= (T1 - T0) + (T4 - T3)
+
+  firmware/BIOS time   ~= T3 - T1
+
+T0 and T1 are printed after their measured regions so printk overhead is not included in the key intervals.
+---
+ arch/arm64/kernel/psci.c | 15 +++++++++++++--
+ arch/arm64/kernel/smp.c  |  4 ++++
+ kernel/cpu.c             |  8 ++++++++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/kernel/psci.c b/arch/arm64/kernel/psci.c
+index 48ff9dc8126a..2757f2d3fb05 100644
+--- a/arch/arm64/kernel/psci.c
++++ b/arch/arm64/kernel/psci.c
+@@ -14,6 +14,7 @@
+ #include <linux/delay.h>
+ #include <linux/psci.h>
+ #include <linux/mm.h>
++#include <linux/ktime.h>
+ 
+ #include <uapi/linux/psci.h>
+ 
+@@ -39,7 +40,18 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
+ static int cpu_psci_cpu_boot(unsigned int cpu)
+ {
+ 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
+-	int err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
++	u64 start, end;
++	int err;
++
++	start = ktime_get_ns();
++	err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
++
++	end = ktime_get_ns();
++	pr_info("CPU%u hotplug online T1 psci cpu_on enter ns=%llu\n",
++		cpu, start);
++	pr_info("CPU%u hotplug online T2 psci cpu_on exit ns=%llu ret=%d delta_ns=%llu\n",
++		cpu, end, err, end - start);
++
+ 	if (err) {
+ 		if (err != -EPERM)
+ 			pr_err("failed to boot CPU%d (%d)\n", cpu, err);
+@@ -125,4 +137,3 @@ const struct cpu_operations cpu_psci_ops = {
+ 	.cpu_kill	= cpu_psci_cpu_kill,
+ #endif
+ };
+-
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 1131f96fa948..75163d84a852 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -34,6 +34,7 @@
+ #include <linux/kexec.h>
+ #include <linux/crash_dump.h>
+ #include <linux/kvm_host.h>
++#include <linux/ktime.h>
+ #ifdef CONFIG_HISI_VIRTCCA_GUEST
+ #include <linux/virtcca_cvm_sched.h>
+ #endif
+@@ -208,6 +209,7 @@ asmlinkage notrace void secondary_start_kernel(void)
+ 	struct mm_struct *mm = &init_mm;
+ 	const struct cpu_operations *ops;
+ 	unsigned int cpu = smp_processor_id();
++	u64 start_ns = ktime_get_ns();
+ 
+ 	/*
+ 	 * All kernel threads share the same mm context; grab a
+@@ -262,6 +264,8 @@ asmlinkage notrace void secondary_start_kernel(void)
+ 	pr_info("CPU%u: Booted secondary processor 0x%010lx [0x%08x]\n",
+ 					 cpu, (unsigned long)mpidr,
+ 					 read_cpuid_id());
++	pr_info("CPU%u hotplug online T3 secondary_start_kernel enter ns=%llu\n",
++		cpu, start_ns);
+ 	update_cpu_boot_status(CPU_BOOT_SUCCESS);
+ 	set_cpu_online(cpu, true);
+ 	complete(&cpu_running);
+diff --git a/kernel/cpu.c b/kernel/cpu.c
+index e5ebc498e328..98f9b2cfa741 100644
+--- a/kernel/cpu.c
++++ b/kernel/cpu.c
+@@ -37,6 +37,7 @@
+ #include <linux/cpuset.h>
+ #include <linux/random.h>
+ #include <linux/cc_platform.h>
++#include <linux/ktime.h>
+ 
+ #include <trace/events/power.h>
+ #define CREATE_TRACE_POINTS
+@@ -1620,6 +1621,8 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
+ {
+ 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
+ 	struct task_struct *idle;
++	u64 start_ns = ktime_get_ns();
++	u64 end_ns;
+ 	int ret = 0;
+ 
+ 	cpus_write_lock();
+@@ -1678,6 +1681,11 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
+ out:
+ 	cpus_write_unlock();
+ 	arch_smt_update();
++	end_ns = ktime_get_ns();
++	pr_info("CPU%u hotplug online T0 _cpu_up start ns=%llu\n",
++		cpu, start_ns);
++	pr_info("CPU%u hotplug online T4 _cpu_up end ns=%llu ret=%d delta_ns=%llu\n",
++		cpu, end_ns, ret, end_ns - start_ns);
+ 	return ret;
+ }
+ 
+-- 
+2.34.1
+
