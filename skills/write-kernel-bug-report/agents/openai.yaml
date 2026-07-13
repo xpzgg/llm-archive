@@ -1,0 +1,4 @@
+interface:
+  display_name: "内核问题报告写作"
+  short_description: "按证据链撰写结构清晰的内核与 Syzkaller 问题报告"
+  default_prompt: "使用 $write-kernel-bug-report 分析给定内核问题并撰写中文报告。"
