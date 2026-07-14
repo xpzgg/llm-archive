@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resolve and Validate Issue"
+  short_description: "Analyze root causes and verify fixes with evidence"
+  default_prompt: "Use $resolve-and-validate-issue to reproduce this issue, identify its root cause, implement a fix, and verify the result."
