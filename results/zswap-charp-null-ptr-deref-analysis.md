@@ -289,3 +289,51 @@ zswap 的自定义 `.set` 回调适合处理以下业务规则：
 8. 重新运行原始 syz reproducer。
 
 修复的关键判定标准不是“`strcmp()` 不再崩溃”，而是“任何 charp 分配失败之后，参数值与调用前完全一致”。这才能证明错误恢复语义已经从根因上修复。
+
+## 当前处理状态
+
+目标 worktree：
+
+    /home/yjc/project/worktree/issue_zswap
+
+已实施的修复：
+
+1. `kernel/params.c` 中的 `param_set_charp()` 已改为先准备 `newval`，只有在 `kmalloc_parameter()` 成功并完成复制后，才释放旧参数并提交新指针。
+2. early boot 路径保持不分配内存，仍直接引用被保留的命令行参数缓冲区。
+3. 为了让回归测试能稳定命中目标分配点，`kmalloc_parameter()` 增加 `ALLOW_ERROR_INJECTION(kmalloc_parameter, NULL)`。
+4. 新增 `tools/testing/selftests/mm/zswap_charp_failure.sh`，并加入 `tools/testing/selftests/mm/Makefile` 的 `TEST_PROGS`。
+
+当前 selftest 的运行前提：
+
+    CONFIG_ZSWAP=y
+    CONFIG_DEBUG_FS=y
+    CONFIG_FUNCTION_ERROR_INJECTION=y
+    CONFIG_FAULT_INJECTION=y
+    CONFIG_FAULT_INJECTION_DEBUG_FS=y
+    CONFIG_FAIL_FUNCTION=y
+
+运行方式：
+
+    # 建议启动参数包含 zswap.enabled=0，并在写 enabled 参数前运行
+    ./tools/testing/selftests/mm/zswap_charp_failure.sh
+
+未修复内核上，普通模式会验证失败后参数是否被改写；`--reproduce` 会在发现参数损坏后继续写 `enabled=0`，用于触发原始 call trace 的消费路径，KASAN 测试内核可能崩溃。
+
+已完成的本地验证：
+
+    bash -n tools/testing/selftests/mm/zswap_charp_failure.sh
+    git diff --check
+    scripts/checkpatch.pl --no-tree --strict --file tools/testing/selftests/mm/zswap_charp_failure.sh
+    git diff -- kernel/params.c tools/testing/selftests/mm/Makefile | scripts/checkpatch.pl --no-tree --strict -
+    make O=/tmp/issue_zswap_build -j8 kernel/params.o kernel/fail_function.o
+    make O=/tmp/issue_zswap_build -j8 mm/zswap.o
+
+其中 `/tmp/issue_zswap_build` 临时配置打开了 `FUNCTION_ERROR_INJECTION`、`FAULT_INJECTION`、`FAULT_INJECTION_DEBUG_FS`、`FAIL_FUNCTION` 和 `ZSWAP`。`kernel/params.o` 中已确认存在 `_eil_addr_kmalloc_parameter` 符号和 `_error_injection_whitelist` section，说明 `kmalloc_parameter()` 的 fail_function 白名单条目真实生成。
+
+尚未在当前容器内完成的验证：
+
+1. 启动包含该补丁的目标内核；
+2. 在目标内核运行 `zswap_charp_failure.sh`；
+3. 在未修复和已修复内核间做动态 A/B 对照。
+
+原因是当前执行环境不是刚构建出的测试内核运行环境，不能直接操作该内核的 `/sys/module/zswap/parameters` 和 `/sys/kernel/debug/fail_function` 状态。动态验证应在 qemu、测试机或 syzkaller 环境中完成。
