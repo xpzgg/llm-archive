@@ -208,205 +208,112 @@ do_pte_missing()
 
 ---
 
-## 关键函数分析
+## 异常分发路径
 
-### 异常向量表（entry.S）
+**设计动机：** ARM 硬件强制 16槽×128字节向量表，128字节放不下完整处理逻辑，只能分两层——槽内跳转，槽外处理。fault 种类多（translation/access flag/permission/alignment），用 FSC 直接当下标查函数指针数组，O(1) 分发。
 
-**ARM64 向量表结构：**
-- 硬件强制 16 个槽，每槽 128 字节（`.align 7`），总计 2KB（`.align 11`）
-- 16 = 4种EL/SP组合 × 4种异常类型（sync/irq/fiq/error）
-- CPU 根据当前 EL 和 SPSel 自动计算偏移跳入对应槽，不查表，是加法
+```
+硬件触发异常
+└── vectors[EL1h sync]
+    kernel_ventry（槽内）：检查栈溢出 → b el1h_64_sync
+    entry_handler（槽外）：kernel_entry 保存寄存器（pt_regs）→ bl el1h_64_sync_handler
 
-**EL1t vs EL1h：**
-- `t`：使用 SP_EL0（Thread 栈指针，ARM 官方命名）
-- `h`：使用 SP_EL1（Handler 栈指针，ARM 官方命名）← page fault 走这里
-- Linux 启动时将 SPSel 设为 1 并保持，EL1t 永远不应触发
-- **EL1t 为何还要存在：** 向量表 16 个槽是硬件强制布局，内核无法删掉这4个槽，只能填上 `UNHANDLED`——如果触发就 panic，做保险
+el1h_64_sync_handler
+    switch(ESR_EL1.EC)
+    DABT/IABT → el1_abort → do_mem_abort
 
-**汇编宏语法（GNU AS `.macro`）：**
-- `.macro` 是**纯文本替换**，等价于 C 的 `#define`，没有声明/定义之分，`.endm` 结束
-- `\el`：引用名为 `el` 的参数
-- `\()`：空分隔符，防止参数名和后续字符粘连（如 `el\el\ht\()_\regsize\()_\label` 拼出函数名）
-- `\@`：展开时自动生成的唯一序号，防止局部标号冲突
-- `.if \el == 0`：汇编时条件判断（不是运行时），用于宏内条件展开
+do_mem_abort
+    fault_info[ESR.FSC].fn()        ← FSC 直接当下标，O(1) 分发
+    translation fault  → do_translation_fault → do_page_fault（用户地址）
+    access flag fault  → do_page_fault
+    permission fault   → do_page_fault
+    alignment fault    → SIGBUS
+```
 
-**`kernel_ventry` 宏（向量槽内容）：**
-- 检查内核栈是否溢出
-- `b el\el\ht\()_\regsize\()_\label`（无条件跳到槽外真正处理函数，如 `b el1h_64_sync`）
-- 之所以分两层：每槽只有 128 字节（32条指令），放不下完整处理逻辑
-
-**`entry_handler` 宏（槽外的处理函数）：**
-- `kernel_entry`：把 x0~x30、SP、PC、PSTATE 全部压栈，形成 `pt_regs`
-- `mov x0, sp`：把 `pt_regs *` 作为第一个 C 参数（`asmlinkage` 约定）
-- `bl el1h_64_sync_handler`：调 C 函数
+**反直觉：** EL1t 的4个槽 Linux 永远不会触发（SPSel 固定为1），但硬件强制占位，填 UNHANDLED，触发即 panic。
 
 ---
 
-### el1h_64_sync_handler（entry-common.c）
+## fault 处理路径
 
-**功能：** 所有 EL1 同步异常的第一个 C 入口，读 ESR 判断异常类型，分发到具体处理函数。
+**设计动机：** 全局 mmap_lock 是多线程 fault 的扩展性瓶颈。引入 per-VMA lock 让不同 VMA 的 fault 并发。硬件 walk 失败后软件重走页表，找到缺失的那级补上。PTE 写操作需要加锁，但先乐观无锁读，只在真正要写时加锁验证。
 
-**关键：** ESR_EL1[31:26] 是 EC 字段，CPU 硬件填好，`switch(EC)` 即可分发。
-- `DABT_CUR`：访存触发（load/store page fault）
-- `IABT_CUR`：取指触发（instruction page fault）
-- 其他：breakpoint / undef / BTI / PAC 等
+```
+do_page_fault
+    快路径：lock_vma_under_rcu → per-VMA 读锁 → handle_mm_fault(FAULT_FLAG_VMA_LOCK)
+            VM_FAULT_RETRY → 降级
+    慢路径：lock_mm_and_find_vma → mmap_lock 读锁 → handle_mm_fault
+            VM_FAULT_RETRY → 重试（带 FAULT_FLAG_TRIED）
+    错误出口：内核态 → panic；用户态 → OOM / SIGBUS / SIGSEGV
 
-**`_CUR` 后缀：** 来自当前 EL（内核自己），区别于来自低 EL 的 `_LOW`（用户态）。
+handle_mm_fault → __handle_mm_fault
+    软件页表 walk（不存在则分配，存在则取指针）：
+    pgd → p4d → pud → pmd → handle_pte_fault
+                ↑          ↑
+          1GB 大页      2MB THP
+
+handle_pte_fault
+    ptep_get_lockless()             无锁读 PTE
+    pte_offset_map_lock()           加锁（整张 PTE 页 512槽共用一把锁）
+    vmf_pte_changed()               验证未被并发修改
+    ├── pte_none      → do_pte_missing → do_anonymous_page / do_fault
+    ├── !pte_present  → do_swap_page
+    ├── pte_protnone  → do_numa_page
+    └── write+!pte_write → do_wp_page
+```
+
+**反直觉：** per-VMA lock 下某些路径（如 do_swap_page 需要 IO）会主动返回 VM_FAULT_RETRY 降级，不是报错，是主动让步给慢路径。
 
 ---
 
-### do_mem_abort（arch/arm64/mm/fault.c）
+## 匿名页 fault（do_anonymous_page）
 
-**功能：** 根据 ESR 中的 FSC（低6位）查 `fault_info[]` 表，调对应处理函数。
+**设计动机：** 读新匿名页内容一定是零，没必要分配物理内存——映射到全局零页即可，写时才真正分配。CoW 也不一定要复制：只有一个引用者时直接改权限，省掉分配和 memcpy。
 
-**设计：** 函数指针数组，FSC 直接当下标，O(1) 分发，避免大 switch。
-
-**关键表项：**
 ```
-FSC 4~7（translation fault）→ do_translation_fault()  SIGSEGV/SEGV_MAPERR
-FSC 8~11（access flag fault）→ do_page_fault()        轻量级，仅置 AF 位
-FSC 12~15（permission fault）→ do_page_fault()        CoW / 权限错误
-FSC 33（alignment fault）   → do_alignment_fault()    SIGBUS
+读路径（零页优化）
+    PTE → 全局零页（只读，pte_mkspecial 不被 rmap 追踪）
+    写 → permission fault → do_wp_page → CoW
+
+写路径
+    vmf_anon_prepare()          确保 anon_vma 存在（rmap 基础）
+    alloc_anon_folio()          分配物理页（优先 THP，回退单页）
+    pte_offset_map_lock()       加锁验证竞态
+    map_anon_folio_pte_pf()     建双向映射
+        folio_add_new_anon_rmap   反向：物理页 → VMA（回收用）
+        set_ptes                  正向：虚拟地址 → 物理页（MMU 用）
+        folio_add_lru_vma         加入 LRU active 链表
+
+do_wp_page（CoW / 写保护）
+    folio_ref_count == 1 或 PageAnonExclusive
+        → wp_page_reuse()       独占，直接改 PTE 权限，不复制
+    否则
+        → wp_page_copy()        alloc + memcpy + 更新 PTE + 更新 rmap
 ```
 
-**两个硬件寄存器：**
-- `ESR_EL1`：异常类型（"发生了什么"）
-- `FAR_EL1`：触发异常的虚拟地址（"在哪发生的"）
+**反直觉：** 独占判断用引用计数 O(1)，不用 rmap 反查 O(n)。引用计数是权威的，rmap 只是辅助。
 
 ---
 
-### do_page_fault（arch/arm64/mm/fault.c）
+## 物理页分配
 
-**功能：** 判断这次 fault 是否合法（VMA 是否存在、权限是否匹配），合法则交给 `handle_mm_fault` 处理，不合法则发信号或 panic。
+**设计动机：** 优先分配大页（THP）降低 TLB 压力；分配后过两道关：cgroup 配额检查 + swap 速率限流。NUMA policy 在此决定从哪个 node 分配。
 
-**前置检查 — kprobe 拦截：**
-```c
-if (kprobe_page_fault(regs, esr)) return 0;
 ```
-kprobe 单步执行原始指令时，若那条指令恰好触发 page fault，这个 fault 属于 kprobe 机制内部的，不走正常 page fault 路径，直接交回给 kprobe 处理。判断条件：内核态 + 不可抢占 + 当前 CPU 正在执行 kprobe，三者同时满足才可能是 kprobe 触发。
+alloc_anon_folio
+    [THP] 过滤可用 order → 扫 PTE 确认范围对齐 → vma_alloc_folio(order>0)
+    fallback: folio_prealloc(need_zero=true)
+        vma_alloc_zeroed_movable_folio    分配 + 清零
+        mem_cgroup_charge()               cgroup 配额（超限还页失败）
+        folio_throttle_swaprate()         swap 压力大时 sleep 限流
 
-**两条路径（性能优化）：**
-- 快速路径：`lock_vma_under_rcu`（RCU 无锁查找），大多数情况在此解决
-- 慢速路径：`lock_mm_and_find_vma`（拿 mmap_lock 读锁），RCU 失败或 retry 时降级
-
-VMA 查找底层：`mt_find(&mm->mm_mt, ...)`，maple tree 范围查找，O(log n)。
-
-**错误出口统一：**
-- 内核态 fault 且无法修复 → `__do_kernel_fault` → oops/panic
-- 用户态 → OOM killer / SIGBUS / SIGSEGV
-
----
-
-### __handle_mm_fault（mm/memory.c）
-
-**功能：** 软件页表 walk，逐级找到（或分配）各级页表，最终到 PTE 层。
-
-**两种 walk 的区别：**
-| | 谁做 | 时机 | 目的 |
-|--|------|------|------|
-| 硬件 walk | MMU 自动 | 每次内存访问 | 翻译虚拟地址→物理地址 |
-| 软件 walk | `__handle_mm_fault` | fault 发生后 | 找到缺失的那一级，补上映射 |
-
-硬件 walk 失败触发 fault，内核软件再 walk 一遍，找到缺的那格填上，下次硬件 walk 就成功。
-
-**页表层级与大页：**
-```
-PGD → P4D → PUD → PMD → PTE（4KB 普通页）
-                ↑         ↑
-           create_huge_pud  create_huge_pmd
-           （1GB 大页）     （2MB THP）
+vma_alloc_folio_noprof → alloc_pages_mpol（应用 NUMA policy）
+    → __alloc_frozen_pages_noprof → buddy
 ```
 
-每一级调 `xxx_alloc`，语义是"不存在就分配，存在就直接返回指针"，内部先检查是否为空再决定是否分配，不是无条件分配。
+**反直觉：** cgroup 记账在拿到物理页之后做——buddy 分配和 cgroup 配额是两个独立关卡，先过 buddy 再过 cgroup，失败则还页。
 
-**vm_fault 结构体的设计：**
-- `pgd`、`p4d` 是局部变量：只在 walk 过程中临时用一下，后续函数不需要
-- `vmf.pud`、`vmf.pmd`、`vmf.pte` 存进 vm_fault：后续 `handle_pte_fault` 及更深层函数只接收一个 `vmf` 参数，需要从里面取这些值
-
-**PTE 命名混淆（内核真实存在）：**
-- `pte_t`（值类型）：一个 8 字节的页表项
-- `pte_t *`（指针）：指向某个槽位的地址
-- `pte_alloc()` / "PTE 页"：存放 512 个 `pte_t` 的那张物理页
-- 靠上下文区分，是内核历史包袱
-
-**两种"PMD 情况"进入 `handle_pte_fault`：**
-- PMD 槽有值（指向 PTE 页）：PTE 页存在，但某格为空 → `do_pte_missing` 只分配物理页
-- PMD 槽为空：PTE 页都还不存在 → `do_anonymous_page` 里先 `pte_alloc` 分配 PTE 页，再分配物理页
-
----
-
-### handle_pte_fault（mm/memory.c）
-
-**功能：** 读 PTE 当前状态，分发到对应处理路径。
-
-**关键模式：lockless 读 → 加锁 → 再验证：**
-```
-ptep_get_lockless()        // 不加锁，快速读 PTE 值，做初步判断
-pte_offset_map_lock()      // 加锁（锁粒度：整张 PTE 页，512个槽共用一把锁）
-vmf_pte_changed()          // 验证 PTE 值是否被其他线程改过
-// 确认未变 → 写入
-```
-这个模式在 MM 代码里到处都有，本质是乐观读：加锁有成本，先不加锁做判断，只在真正要写时加锁并验证。
-
-**锁粒度：** 一张 PTE 页（512 个槽）共用一把 spinlock，存在 `struct page` 里，不额外占内存。粒度比整个 mm 细得多，但比单个 PTE 槽粗——工程权衡：per-PTE 锁内存开销太大，且同一张 PTE 页内并发 fault 的概率极低。
-
----
-
-### do_anonymous_page（mm/memory.c）
-
-**功能：** 为第一次访问的匿名虚拟地址（堆、栈、`mmap(MAP_ANONYMOUS)`）建立物理映射。
-
-**核心设计：读懒，写实。**
-
-**读路径（零页优化）：**
-```
-entry = pte_mkspecial(pfn_pte(zero_pfn, vma->vm_page_prot))
-set_pte_at(...)   // PTE → 全局零页（只读）
-```
-- `malloc(1MB)` 后只读：所有页都映射到同一个全局零页，不分配任何物理内存
-- `pte_mkspecial`：标记为 special，rmap 不追踪（零页永远不会被回收）
-- 第一次写 → 触发 permission fault → `do_wp_page`（CoW）→ 才真正分配物理页
-
-**写路径（真实分配）：**
-```
-vmf_anon_prepare()         // 确保 anon_vma 存在（rmap 基础结构）
-alloc_anon_folio()         // 从 buddy 分配物理页（可能是 4KB 或小 THP）
-__folio_mark_uptodate()    // 内存屏障，确保页内容对所有 CPU 可见
-pte_offset_map_lock()      // 加锁 + 验证竞态
-map_anon_folio_pte_pf()    // 建双向映射
-```
-
-**双向映射（`map_anon_folio_pte_nopf` 内）：**
-```
-folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE)
-    // 反向：物理页 → VMA（内存回收时反查用）
-set_ptes(mm, addr, pte, entry, nr_pages)
-    // 正向：虚拟地址 → 物理页（硬件 MMU 翻译用）
-folio_add_lru_vma(folio, vma)
-    // 加入 LRU active 链表，参与页回收老化
-```
-两个方向都建立后，fault 才真正结束。
-
----
-
-### do_wp_page（mm/memory.c）
-
-**功能：** 处理写保护 fault（写只读 PTE）。判断能否复用当前页，或必须复制一份（CoW）。
-
-**触发场景：**
-1. `fork` 后父子共享页，PTE 被标只读，任意一方写
-2. `do_anonymous_page` 读路径映射了零页，第一次写
-
-**判断是否可复用（避免复制）：**
-- 主要靠 `folio_ref_count == 1`：引用计数为 1 说明只有我一个人持有，直接改 PTE 为可写，不复制
-- `PageAnonExclusive` flag：内核已确认独占的缓存结论，直接复用，不查引用计数
-- 用引用计数而非 rmap 反查：O(1) vs O(n)，且计数是权威的
-
-**两条出路：**
-```
-独占（ref_count==1）→ wp_page_reuse()：改 PTE 权限，省掉内存分配和复制
-共享（ref_count>1）→ wp_page_copy()：alloc + memcpy + 更新 PTE + 更新 rmap
-```
+物理分配内部详见 [buddy.md](buddy.md)。
 
 ---
 
@@ -414,13 +321,13 @@ folio_add_lru_vma(folio, vma)
 
 | 概念 | 一句话 |
 |------|--------|
-| `pt_regs` | 异常发生时 CPU 所有寄存器的快照，`kernel_entry` 压栈，C 函数通过指针访问 |
-| `ESR_EL1` | CPU 硬件填的"异常说明书"，EC 字段说明异常类型，FSC 说明具体错误 |
-| `FAR_EL1` | CPU 硬件填的"出错地址"，即触发 fault 的虚拟地址 |
-| `fault_info[]` | FSC 直接当下标的函数指针数组，O(1) 分发到具体处理函数 |
-| `vm_fault` | 贯穿整个 fault 处理链的上下文包，pud/pmd/pte/folio 等沿途填进去往下传 |
-| `folio` | 新的物理页抽象（替代 `page`），可以是一个或多个连续页，MM 代码正在迁移中 |
-| `anon_vma` | rmap 的基础结构，记录匿名物理页被哪些 VMA 映射，内存回收时反查用 |
-| AF bit | PTE bit[10]，**kswapd 主动清零**（不是自动）用于探测页是否还在使用，两阶段：①清 AF（探测）→ 等待 → ②还是 0 则回收，被访问则 access flag fault → 内核置 1。ARMv8.1 HAFDBS 让硬件自动置位 AF，彻底消除这个 fault |
-| 零页（zero page）| 全局只读全零物理页，读 fault 的匿名页先映射到这里，写时才 CoW 分配真实页 |
-| TLB flush | 修改已有 PTE 后必须做；新建 PTE（从无到有）不需要 flush，TLB miss 后自然填入 |
+| `pt_regs` | 异常时 CPU 寄存器快照，`kernel_entry` 压栈，C 函数通过指针访问 |
+| `ESR_EL1 / FAR_EL1` | 硬件填的异常说明书（类型+FSC）和出错虚拟地址 |
+| `fault_info[]` | FSC 直接当下标的函数指针数组，O(1) 分发 |
+| `vm_fault` | 贯穿整个 fault 处理链的上下文包，各层沿途填入往下传 |
+| `folio` | 新的物理页抽象，替代 `page`，可跨多个连续页 |
+| `anon_vma` | 匿名页 rmap 的基础结构，记录物理页被哪些 VMA 映射，回收时用 |
+| AF bit | kswapd 主动清零探测页冷热，被访问触发 access flag fault 重新置 1；ARMv8.1 HAFDBS 让硬件自动置位，消除此 fault |
+| 零页 | 全局只读零页，读 fault 先映射到这里，写时 CoW 才分配真实页 |
+| TLB flush | 修改已有 PTE 必须 flush；新建 PTE 不需要，TLB miss 后自然填入 |
+| per-VMA lock | 细粒度锁，让不同 VMA 上的 fault 并发，避免全局 mmap_lock 成瓶颈 |
