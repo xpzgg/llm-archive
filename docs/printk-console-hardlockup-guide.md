@@ -8,12 +8,12 @@
 
 | 优先级 | 操作 | 是否重启 | 说明 |
 |---|---|---:|---|
-| 1 | 去掉串口 console，例如移除 `console=ttyAMA0,115200`，保留 `console=tty0` | 是 | 最彻底，运行期不再同步刷 PL011 串口 |
-| 2 | 降低 console loglevel，例如 `echo 4 > /proc/sys/kernel/printk` | 否 | 只让 `ERR` 及以上日志上 console，`dmesg` 仍可看 ring buffer |
-| 3 | 持久降低 console loglevel，例如 `kernel.printk = 4 4 1 7` | 否 | 重启后保留，适合作为默认生产配置 |
-| 4 | 排查并限速日志风暴源头 | 视情况 | 用 `*_ratelimited()`、tracepoint 或计数器替代高频 `printk()` |
+| 1 | 降低 console loglevel，例如 `echo 5 > /proc/sys/kernel/printk` | 否 | 保留 `WARNING` 及以上日志上 console，抑制 `NOTICE/INFO/DEBUG` |
+| 2 | 持久降低 console loglevel，例如 `kernel.printk = 5 4 1 7` | 否 | 重启后保留，适合作为默认运行配置 |
+| 3 | 排查并限速日志风暴源头 | 视情况 | 用 `*_ratelimited()`、tracepoint 或计数器替代高频 `printk()` |
+| 4 | 去掉串口 console，例如移除 `console=ttyAMA0,115200`，保留 `console=tty0` | 是 | 仅适合已有 journal/kdump/pstore/远端日志链路且不依赖串口实时日志的生产环境 |
 
-串口的主要价值是早期启动、panic/oops、网络不可用时的带外救援和硬件 bring-up。生产环境通常不会让串口打印所有级别日志；全量日志应通过 `/dev/kmsg`、journald、rsyslog、日志 agent、kdump 或 pstore 保存。
+串口的主要价值是早期启动、panic/oops、网络不可用时的带外救援和硬件 bring-up。是否能关闭串口 console，不取决于是不是网络引导或无盘 OS，而取决于故障发生窗口里有没有可靠替代日志出口。回片联调、FPGA/EVB bring-up、bootloader/early kernel、用户态未起来、网络/存储本身是调试对象、panic/oops 前后没有可靠 kdump/pstore/netconsole/远端日志时，不建议关闭串口 console；这种场景优先降低 console loglevel、提高波特率、扩大 `log_buf_len`、清理日志风暴并给高频日志加限速。生产环境通常不会让串口打印所有级别日志；全量日志应通过 `/dev/kmsg`、journald、rsyslog、日志 agent、kdump 或 pstore 保存。
 
 ## 背景
 
@@ -233,7 +233,28 @@ cat /sys/class/tty/console/active
 
 如果输出包含 `ttyAMA0`、`ttyS0` 等串口设备，说明运行期内核日志可能同步刷到串口。
 
-### 2. 关闭串口 Console
+### 2. 降低 Console 打印级别（推荐）
+
+如果必须保留串口 console，先降低 console loglevel，减少输出到串口的日志量。推荐设置为 `5`，保留 `WARNING` 及以上关键日志，同时抑制 `NOTICE`、`INFO`、`DEBUG`。具体命令见下一章“打印级别查看与设置”。
+
+注意：降低 console loglevel 只能减少普通日志输出，不能完全消除风险。`panic`、`oops`、RCU stall、soft lockup、hard lockup 等严重路径仍可能产生大量高优先级日志。
+
+### 3. 保留串口场景下的额外规避
+
+不建议关闭串口 console 的核心条件是：故障发生时，除串口外没有可靠日志出口。典型包括回片联调、FPGA/EVB bring-up、bootloader/early kernel 调试、用户态尚未起来、网络或存储本身是调试对象、panic/oops 前后 kdump/pstore/netconsole/远端日志不可用或未验证。
+
+网络引导和无本地盘 OS 不是绝对条件。如果系统已经稳定进入用户态，网络日志链路、kdump、pstore 或 netconsole 已验证可用，并且串口不是救援要求，可以只降低串口 console loglevel，甚至在生产运行环境关闭串口 console。若问题发生在网络初始化前、根文件系统挂载前，或问题本身就是网卡、交换链路、NFS/iSCSI/rootfs 挂载失败，则仍应保留串口 console。
+
+必须保留串口 console 时，建议组合使用：
+
+- 提高串口波特率，例如硬件和工具链支持时使用 `921600`、`1500000` 等；
+- 启动参数里设置 `loglevel=5`，避免 `INFO/DEBUG` 默认刷到串口；
+- 避免使用 `ignore_loglevel`，除非短时间抓取启动问题；
+- 增大 printk ring buffer，例如设置 `log_buf_len=16M` 或更高，减少历史日志被覆盖；
+- 对驱动反复报错路径使用 `pr_*_ratelimited()`、`dev_*_ratelimited()`；
+- 网络可用后补充 `netconsole`，有保留内存时补充 `pstore/ramoops`，避免只依赖低速串口。
+
+### 4. 关闭串口 Console（仅限不依赖串口日志的生产环境）
 
 如果生产环境不依赖串口实时看内核日志，推荐从 cmdline 移除串口 console。
 
@@ -258,13 +279,7 @@ console=tty0
 - `dmesg`、`journalctl -k`、日志 agent 仍可读取内核日志；
 - 失去串口实时救援日志，需要依赖 kdump、pstore、BMC 其他能力或远端日志。
 
-### 3. 降低 Console 打印级别（推荐）
-
-如果暂时不能重启或不能关闭串口 console，先降低 console loglevel，减少输出到串口的日志量。具体命令见下一章“打印级别查看与设置”。
-
-注意：降低 console loglevel 只能减少普通日志输出，不能完全消除风险。`panic`、`oops`、RCU stall、soft lockup、hard lockup 等严重路径仍可能产生大量高优先级日志。
-
-### 4. 确认日志仍可查看
+### 5. 确认日志仍可查看
 
 关闭串口 console 或降低 console loglevel 不等于删除内核日志。确认方式：
 
@@ -287,7 +302,7 @@ mount | grep pstore
 ls -l /sys/fs/pstore 2>/dev/null
 ```
 
-### 5. 查找并限速日志风暴源头
+### 6. 查找并限速日志风暴源头
 
 实时观察内核日志：
 
@@ -354,26 +369,32 @@ cat /proc/sys/kernel/printk
 
 ### 2. 临时修改打印级别
 
-只让 `ERR` 及以上日志输出到 console：
+推荐保留 `WARNING` 及以上日志输出到 console，抑制 `NOTICE/INFO/DEBUG`：
+
+```bash
+echo 5 > /proc/sys/kernel/printk
+```
+
+等价命令：
+
+```bash
+dmesg -n 5
+sysctl -w kernel.printk="5 4 1 7"
+```
+
+如果串口仍然被严重日志打爆，可临时改为只输出 `ERR` 及以上：
 
 ```bash
 echo 4 > /proc/sys/kernel/printk
 ```
 
-更激进，只让 `CRIT` 及以上日志输出到 console：
+更激进时，只让 `CRIT` 及以上日志输出到 console：
 
 ```bash
 echo 3 > /proc/sys/kernel/printk
 ```
 
-也可以使用：
-
-```bash
-dmesg -n 4
-sysctl -w kernel.printk="4 4 1 7"
-```
-
-注意：`echo 5 > /proc/sys/kernel/printk` 表示 `0..4` 都会输出到 console，会包含 `WARNING`，不是通用意义上的“调低”。只有当前值大于 5 时，它才是在降低输出量。
+注意：`echo 5 > /proc/sys/kernel/printk` 表示 `0..4` 会输出到 console，也就是保留 `WARNING` 及以上日志。它会抑制 `NOTICE/INFO/DEBUG`，但不会抑制 warning。
 
 ### 3. 永久修改打印级别
 
@@ -381,7 +402,7 @@ sysctl -w kernel.printk="4 4 1 7"
 
 ```bash
 cat >/etc/sysctl.d/99-kernel-printk.conf <<'EOF'
-kernel.printk = 4 4 1 7
+kernel.printk = 5 4 1 7
 EOF
 sysctl -p /etc/sysctl.d/99-kernel-printk.conf
 ```
@@ -397,7 +418,7 @@ sysctl -w kernel.printk="3 4 1 7"
 在内核启动参数中添加：
 
 ```text
-loglevel=4
+loglevel=5
 ```
 
 这会设置启动后的默认 console loglevel。它只影响 console 输出，不影响 `printk()` 写入 ring buffer，也不影响 `dmesg` 从 ring buffer 读取日志。
