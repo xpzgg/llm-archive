@@ -81,7 +81,7 @@
 ```
 printk()
   vprintk_emit()
-    console_unlock()
+    console_unlock()         # 打印ring buffer内所有日志
       console_flush_all()
         do while any_progress:
           for_each_console:
@@ -207,7 +207,7 @@ cat /sys/class/tty/console/active
 
 如果输出包含 `ttyAMA0`、`ttyS0` 等串口设备，说明运行期内核日志可能同步刷到串口。
 
-### 2. 关闭串口 Console（推荐）
+### 2. 关闭串口 Console
 
 如果生产环境不依赖串口实时看内核日志，推荐从 cmdline 移除串口 console。
 
@@ -232,7 +232,7 @@ console=tty0
 - `dmesg`、`journalctl -k`、日志 agent 仍可读取内核日志；
 - 失去串口实时救援日志，需要依赖 kdump、pstore、BMC 其他能力或远端日志。
 
-### 3. 降低 Console 打印级别
+### 3. 降低 Console 打印级别（推荐）
 
 如果暂时不能重启或不能关闭串口 console，先降低 console loglevel，减少输出到串口的日志量。具体命令见下一章“打印级别查看与设置”。
 
