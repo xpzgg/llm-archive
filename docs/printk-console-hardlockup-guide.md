@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-串口 console 是低带宽的调试和救援通道，不适合作为生产环境的全量内核日志输出通道；当内核日志量很大时，`printk()` 同步刷慢速串口会长时间占用 CPU，常见结果是 soft lockup 或 RCU stall。只有当打印发生在中断上下文、关中断区域或其他原子上下文，并触发 `console_unlock()` 批量 flush backlog 时，才更容易进一步放大成 hard lockup。
+串口 console 是低带宽的调试和救援通道，不适合作为生产环境的全量内核日志输出通道。常见 `115200` baud 串口实际吞吐约 `11 KB/s`，按一行日志 80 字节估算，每秒只能输出约 140 行；当内核日志量很大时，`printk()` 同步刷慢速串口会长时间占用 CPU，常见结果是 soft lockup 或 RCU stall。只有当打印发生在中断上下文、关中断区域或其他原子上下文，并触发 `console_unlock()` 批量 flush backlog 时，才更容易进一步放大成 hard lockup。
 
 推荐处置优先级：
 
