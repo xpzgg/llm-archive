@@ -81,7 +81,7 @@
 ```
 printk()
   vprintk_emit()
-    console_unlock()         # 打印ring buffer内所有日志
+    console_unlock()         # 尽量补刷该 console 落后的日志
       console_flush_all()
         do while any_progress:
           for_each_console:
@@ -104,6 +104,31 @@ printk()
 - `console_emit_next_record()` 粒度：每次取一条 record，关本地中断，调用 console driver 输出这一条 record，再恢复中断状态。
 
 如果调用者原本就在中断上下文里，本地 IRQ 进入前已经是 disabled，那么每条 record 结束后的 `local_irq_restore()` 只会恢复到原来的 disabled 状态，并不会在两条日志之间真正打开普通 IRQ。
+
+`console_unlock()` 也有一套“允许调度时让出 CPU”的机制，但它只在特定路径生效。显式调用 `console_lock()` 的可睡眠路径会设置 `console_may_schedule = 1`，后续 flush 时可以在 record 之间执行 `cond_resched()`：
+
+```text
+console_lock()
+  console_may_schedule = 1
+console_unlock()
+  console_flush_all(do_cond_resched = true)
+    每输出一条 record 后可 cond_resched()
+```
+
+普通运行时 `printk()` 的自动 flush 路径通常不是这样。`printk()` 被设计成可以从持锁、抢占关闭、中断等危险上下文调用，不能假设当前 CPU 可以睡眠，所以它默认使用更保守的 trylock/spinning 路径：
+
+```text
+vprintk_emit()
+  preempt_disable()
+  console_trylock_spinning()
+    console_trylock()
+      console_may_schedule = 0
+  console_unlock()
+    console_flush_all(do_cond_resched = false)
+  preempt_enable()
+```
+
+这也是为什么普通运行时日志风暴仍可能导致 soft lockup：即使当前看起来是进程上下文，`printk()` 自动刷 console 时也通常不会依赖 `cond_resched()` 来切走，而是倾向于尽快把 console backlog 同步刷完。
 
 ## 串口打印可能导致哪些问题
 
@@ -176,6 +201,7 @@ pl011_write(ch, uap, REG_DR);
 - 硬件 RAS/CE 错误风暴，内核持续打印错误；
 - 驱动进入异常状态，循环 `printk()` 或 `dev_err()`；
 - 生产环境误开 debug、dynamic debug、`ignore_loglevel` 或高 console loglevel；
+- 串口 console 注册或 boot console 切换到正式 console 时，ring buffer 已经积累了大量启动日志，新注册的串口需要追赶历史 backlog，容易在注册路径触发 soft lockup；
 - RCU stall、soft lockup、hard lockup 报告互相放大，stall 报告本身又制造大量 console 输出；
 - 串口 console 低波特率，或 BMC SoL/串口链路非常慢。
 
