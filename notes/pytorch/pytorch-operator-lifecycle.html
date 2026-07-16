@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>一个 PyTorch 算子的一生</title>
+  <style>
+    :root {
+      --ink: #090b10;
+      --muted: #626a78;
+      --faint: #9097a3;
+      --rule: #b8bcc4;
+      --panel: #eef0f3;
+      --blue: #3d8dff;
+      --cyan: #6dcbf4;
+      --blue-soft: #dff3ff;
+      --white: #fff;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: #11141a;
+      color: var(--ink);
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    #viewport { position: fixed; inset: 0; display: grid; place-items: center; }
+    #deck {
+      position: relative;
+      width: 1280px;
+      height: 720px;
+      background: var(--white);
+      transform-origin: center center;
+      box-shadow: 0 28px 90px rgba(0,0,0,.38);
+    }
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: 38px 42px 34px;
+      background: var(--white);
+      overflow: hidden;
+    }
+    .slide.active { display: block; }
+    .eyebrow {
+      font-size: 15px;
+      line-height: 1;
+      font-weight: 780;
+      letter-spacing: .13em;
+      color: var(--blue);
+      margin-bottom: 18px;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 82px; line-height: 1.06; letter-spacing: -.045em; font-weight: 740; }
+    h2 { font-size: 48px; line-height: 1.12; letter-spacing: -.035em; font-weight: 730; max-width: 1160px; }
+    h3 { font-size: 30px; line-height: 1.22; letter-spacing: -.02em; font-weight: 720; }
+    p, li { font-size: 22px; line-height: 1.48; }
+    a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    .lead { font-size: 29px; line-height: 1.36; color: var(--muted); }
+    .small { font-size: 17px; line-height: 1.45; }
+    .tiny { font-size: 14px; line-height: 1.4; }
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); }
+    .accent { color: var(--blue); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing: -.025em; }
+    .content { margin-top: 34px; }
+    .panel { background: var(--panel); }
+    .panel-blue { background: var(--blue-soft); }
+    .tag {
+      display: inline-block;
+      padding: 7px 10px;
+      border: 1px solid var(--ink);
+      font-size: 14px;
+      line-height: 1;
+      font-weight: 780;
+      letter-spacing: .05em;
+    }
+    .footer {
+      position: absolute;
+      left: 42px;
+      right: 42px;
+      bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: #737b89;
+      letter-spacing: .04em;
+    }
+    .footer .appendix { color: var(--blue); font-weight: 750; }
+    .phase-line { position: absolute; top: 0; left: 0; width: 100%; height: 6px; background: var(--ink); }
+    .phase-line.compile { background: var(--cyan); }
+    .phase-line.load { background: var(--blue); }
+    .phase-line.call { background: #6e57ff; }
+    .phase-line.kernel { background: var(--ink); }
+
+    /* cover */
+    .cover .eyebrow { color: var(--ink); }
+    .cover h1 { width: 790px; margin-top: 94px; }
+    .cover .subtitle { margin-top: 32px; font-size: 30px; color: var(--muted); }
+    .cover-flow { position: absolute; right: 45px; top: 108px; width: 300px; }
+    .cover-flow .step {
+      height: 72px;
+      margin-bottom: 10px;
+      padding: 19px 23px;
+      background: var(--panel);
+      border-left: 6px solid var(--ink);
+      font-size: 22px;
+      font-weight: 720;
+    }
+    .cover-flow .step:nth-child(2) { background: var(--blue-soft); border-left-color: var(--cyan); }
+    .cover-flow .step:nth-child(3) { background: var(--blue); color: white; border-left-color: var(--blue); }
+    .cover-flow .step:nth-child(4) { background: var(--ink); color: white; }
+
+    /* overview 1 */
+    .timescales { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 60px; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+    .timescale { position: relative; min-height: 350px; padding: 31px 34px 32px; }
+    .timescale + .timescale { border-left: 1px solid var(--rule); }
+    .timescale:nth-child(2) { background: var(--blue-soft); }
+    .timescale .n { color: var(--blue); font-size: 18px; font-weight: 800; }
+    .timescale h3 { font-size: 35px; margin-top: 35px; }
+    .timescale p { margin-top: 16px; color: var(--muted); }
+    .timescale .artifact { position: absolute; left: 34px; bottom: 28px; font-size: 17px; font-weight: 750; }
+
+    /* overview 2 */
+    .route { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; margin-top: 64px; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+    .route-node { min-height: 292px; padding: 29px 18px 23px; position: relative; }
+    .route-node + .route-node { border-left: 1px solid var(--rule); }
+    .route-node:nth-child(3), .route-node:nth-child(4) { background: var(--blue-soft); }
+    .route-node:nth-child(7) { background: var(--ink); color: white; }
+    .route-node .rn { font-size: 16px; font-weight: 800; color: var(--blue); }
+    .route-node h3 { font-size: 23px; margin-top: 29px; }
+    .route-node p { font-size: 16px; line-height: 1.42; margin-top: 12px; color: var(--muted); }
+    .route-node:last-child p { color: #bbc3ce; }
+    .route-node .phase { position: absolute; left: 18px; bottom: 21px; font-size: 13px; font-weight: 750; letter-spacing: .07em; }
+    .route-claim { margin-top: 27px; font-size: 26px; font-weight: 720; }
+
+    /* then / now */
+    .then-now { display: grid; grid-template-columns: 1fr 1fr; gap: 46px; margin-top: 42px; }
+    .era { min-height: 386px; border-top: 8px solid var(--ink); padding-top: 25px; }
+    .era.now { border-top-color: var(--blue); }
+    .era .year { font-size: 16px; color: var(--muted); font-weight: 800; letter-spacing: .1em; }
+    .era h3 { margin-top: 13px; font-size: 33px; }
+    .era-flow { margin-top: 27px; }
+    .era-row { padding: 16px 0; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 165px 1fr; gap: 18px; align-items: baseline; }
+    .era-row strong { font-size: 19px; }
+    .era-row span { font-size: 18px; color: var(--muted); line-height: 1.4; }
+    .era-note { margin-top: 18px; font-size: 18px; color: var(--blue); font-weight: 720; }
+
+    /* combinatorial tension */
+    .dimensions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 47px; }
+    .dimension { min-height: 298px; padding-top: 24px; border-top: 7px solid var(--ink); }
+    .dimension:nth-child(2), .dimension:nth-child(3) { border-top-color: var(--blue); }
+    .dimension .dn { font-size: 56px; line-height: 1; color: #d4d8df; font-weight: 750; }
+    .dimension h3 { margin-top: 23px; font-size: 28px; }
+    .dimension p { margin-top: 14px; font-size: 18px; color: var(--muted); }
+    .dimension-example { margin-top: 15px; font-size: 15px; font-weight: 720; color: var(--blue); }
+    .dimension-claim { margin-top: 28px; font-size: 27px; font-weight: 730; }
+
+    /* yaml */
+    .contract { display: grid; grid-template-columns: 560px 1fr; gap: 56px; margin-top: 35px; }
+    .yaml {
+      background: var(--ink);
+      color: #f6f8fb;
+      padding: 27px 30px;
+      min-height: 410px;
+      font: 18px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .yaml .y-key { color: var(--cyan); }
+    .yaml .y-dim { color: #aab3c1; }
+    .contract-list { padding-top: 3px; }
+    .contract-row { display: grid; grid-template-columns: 130px 1fr; gap: 20px; padding: 19px 0; border-top: 1px solid var(--rule); }
+    .contract-row:first-child { border-top: 2px solid var(--ink); }
+    .contract-row strong { font-size: 21px; }
+    .contract-row p { font-size: 18px; color: var(--muted); }
+
+    /* torchgen */
+    .compiler-map { display: grid; grid-template-columns: 260px 1fr; gap: 55px; margin-top: 42px; }
+    .compiler-core { height: 410px; padding: 35px 30px; background: var(--blue); color: white; display: flex; flex-direction: column; justify-content: space-between; }
+    .compiler-core h3 { font-size: 40px; }
+    .compiler-core p { font-size: 18px; color: #e9f3ff; }
+    .projections { display: grid; grid-template-columns: repeat(2, 1fr); border-top: 1px solid var(--ink); border-left: 1px solid var(--ink); }
+    .projection { min-height: 190px; padding: 25px 27px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+    .projection .pk { font-size: 14px; color: var(--blue); font-weight: 800; letter-spacing: .08em; }
+    .projection h3 { font-size: 25px; margin-top: 15px; }
+    .projection p { font-size: 17px; color: var(--muted); margin-top: 10px; }
+
+    /* structured */
+    .structured { display: grid; grid-template-columns: 1fr 70px 1fr; gap: 0; align-items: stretch; margin-top: 50px; }
+    .structured-side { min-height: 335px; padding: 31px 34px; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+    .structured-side.impl { background: var(--ink); color: white; }
+    .structured-side .sk { font-size: 15px; font-weight: 800; color: var(--blue); letter-spacing: .08em; }
+    .structured-side.impl .sk { color: var(--cyan); }
+    .structured-side h3 { font-size: 35px; margin-top: 30px; }
+    .structured-side p { margin-top: 18px; color: var(--muted); }
+    .structured-side.impl p { color: #bdc5d1; }
+    .structured-bridge { display: grid; place-items: center; font-size: 38px; color: var(--blue); font-weight: 750; }
+    .variants { display: flex; gap: 20px; margin-top: 26px; }
+    .variant { padding: 11px 15px; background: var(--panel); font-size: 16px; font-weight: 720; }
+    .structured-side.impl .variant { background: #252a33; }
+
+    /* registry */
+    .registry { display: grid; grid-template-columns: 360px 1fr; gap: 64px; margin-top: 41px; }
+    .registrations { border-top: 2px solid var(--ink); }
+    .reg { padding: 25px 0; border-bottom: 1px solid var(--rule); }
+    .reg code { font-size: 25px; font-weight: 750; }
+    .reg p { margin-top: 10px; font-size: 18px; color: var(--muted); }
+    .entry { min-height: 403px; padding: 31px 35px; background: var(--panel); }
+    .entry-top { display: flex; justify-content: space-between; align-items: baseline; }
+    .entry-top h3 { font-size: 34px; }
+    .entry-top span { font-size: 16px; color: var(--blue); font-weight: 720; }
+    .entry-row { display: grid; grid-template-columns: 170px 1fr; gap: 20px; padding: 18px 0; border-top: 1px solid var(--rule); }
+    .entry-row:first-of-type { margin-top: 25px; border-top: 2px solid var(--ink); }
+    .entry-row strong { font-size: 20px; }
+    .entry-row p { font-size: 17px; color: var(--muted); }
+
+    /* language boundary */
+    .boundary { margin-top: 50px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+    .boundary-step { min-height: 335px; padding: 29px 28px; position: relative; }
+    .boundary-step + .boundary-step { border-left: 1px solid var(--rule); }
+    .boundary-step:nth-child(3) { background: var(--blue-soft); }
+    .boundary-step .bn { font-size: 17px; color: var(--blue); font-weight: 800; }
+    .boundary-step h3 { margin-top: 31px; font-size: 28px; }
+    .boundary-step p { margin-top: 15px; font-size: 18px; color: var(--muted); }
+    .boundary-step .artifact { position: absolute; left: 28px; bottom: 24px; font-size: 14px; font-weight: 730; }
+
+    /* keyset */
+    .formula { margin-top: 54px; padding: 27px 0; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); font-size: 39px; line-height: 1.38; font-weight: 730; }
+    .formula .op { color: var(--blue); padding: 0 10px; }
+    .key-origins { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 30px; }
+    .key-origin { padding-top: 17px; border-top: 5px solid var(--panel); }
+    .key-origin:nth-child(2) { border-top-color: var(--cyan); }
+    .key-origin:nth-child(3) { border-top-color: var(--blue); }
+    .key-origin h3 { font-size: 23px; }
+    .key-origin p { font-size: 17px; color: var(--muted); margin-top: 9px; }
+
+    /* semantic stack */
+    .semantic { display: grid; grid-template-columns: 470px 1fr; gap: 72px; align-items: center; margin-top: 36px; }
+    .stack { width: 450px; }
+    .stack-row { height: 61px; padding: 15px 21px; border-bottom: 6px solid white; background: var(--panel); display: flex; justify-content: space-between; align-items: center; font-size: 21px; font-weight: 720; }
+    .stack-row.active { background: var(--blue); color: white; }
+    .stack-row.backend { background: var(--ink); color: white; }
+    .stack-row span:last-child { font-size: 13px; opacity: .72; }
+    .peel-step { display: grid; grid-template-columns: 47px 1fr; gap: 18px; padding: 18px 0; border-top: 1px solid var(--rule); }
+    .peel-step:first-child { border-top: 2px solid var(--ink); }
+    .peel-step .pn { font-size: 23px; color: var(--blue); font-weight: 800; }
+    .peel-step h3 { font-size: 25px; }
+    .peel-step p { font-size: 18px; color: var(--muted); margin-top: 6px; }
+
+    /* cuda wrapper */
+    .wrapper-flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 53px; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+    .wrapper-step { min-height: 350px; padding: 31px 33px; position: relative; }
+    .wrapper-step + .wrapper-step { border-left: 1px solid var(--rule); }
+    .wrapper-step:nth-child(2) { background: var(--blue-soft); }
+    .wrapper-step:last-child { background: var(--ink); color: white; }
+    .wrapper-step .wn { font-size: 16px; color: var(--blue); font-weight: 800; }
+    .wrapper-step:last-child .wn { color: var(--cyan); }
+    .wrapper-step h3 { font-size: 32px; margin-top: 31px; }
+    .wrapper-step p { margin-top: 17px; color: var(--muted); }
+    .wrapper-step:last-child p { color: #bdc5d1; }
+    .wrapper-step .result { position: absolute; left: 33px; bottom: 28px; font-size: 17px; font-weight: 750; }
+
+    /* dtype */
+    .dispatch-levels { display: grid; grid-template-columns: 1fr 80px 1fr; align-items: stretch; margin-top: 53px; }
+    .dispatch-level { min-height: 354px; padding: 32px 35px; border-top: 7px solid var(--blue); background: var(--blue-soft); }
+    .dispatch-level.dtype { border-top-color: var(--ink); background: var(--panel); }
+    .dispatch-level .dk { font-size: 15px; color: var(--blue); font-weight: 800; letter-spacing: .08em; }
+    .dispatch-level h3 { font-size: 34px; margin-top: 29px; }
+    .dispatch-level p { margin-top: 16px; color: var(--muted); }
+    .dispatch-level .choice { margin-top: 34px; font-size: 22px; font-weight: 750; }
+    .dispatch-arrow { display: grid; place-items: center; font-size: 39px; color: var(--blue); font-weight: 750; }
+
+    /* launch */
+    .launches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; margin-top: 47px; }
+    .launch { min-height: 300px; padding-top: 25px; border-top: 7px solid var(--ink); }
+    .launch:nth-child(1) { border-top-color: var(--blue); }
+    .launch:nth-child(2) { border-top-color: var(--cyan); }
+    .launch .lk { font-size: 14px; color: var(--blue); font-weight: 800; letter-spacing: .08em; }
+    .launch h3 { font-size: 29px; margin-top: 22px; }
+    .launch p { margin-top: 14px; font-size: 18px; color: var(--muted); }
+    .launch .decision { margin-top: 25px; font-size: 17px; font-weight: 750; }
+    .launch-claim { margin-top: 26px; font-size: 26px; font-weight: 730; }
+
+    /* synthesis table */
+    .shrink-table { margin-top: 37px; border-top: 2px solid var(--ink); }
+    .shrink-head, .shrink-row { display: grid; grid-template-columns: 220px 285px 1fr 270px; gap: 20px; align-items: baseline; }
+    .shrink-head { padding: 13px 0; font-size: 14px; color: var(--muted); font-weight: 800; letter-spacing: .07em; }
+    .shrink-row { padding: 17px 0; border-top: 1px solid var(--rule); }
+    .shrink-row h3 { font-size: 22px; }
+    .shrink-row p { font-size: 17px; color: var(--muted); }
+    .shrink-row .out { font-size: 17px; font-weight: 730; color: var(--blue); }
+
+    /* closing */
+    .closing h2 { font-size: 68px; line-height: 1.08; max-width: 1080px; margin-top: 105px; }
+    .principles { margin-top: 62px; width: 1090px; }
+    .principle { display: grid; grid-template-columns: 41px 1fr; gap: 20px; padding: 13px 0; border-top: 1px solid var(--rule); font-size: 24px; }
+    .principle .dot { width: 13px; height: 13px; background: var(--blue); margin-top: 9px; }
+    .closing .last { position: absolute; right: 42px; bottom: 56px; font-size: 19px; color: var(--muted); }
+
+    /* appendix */
+    .source-map { margin-top: 34px; }
+    .source-row { display: grid; grid-template-columns: 225px 1fr 410px; gap: 25px; padding: 13px 0; border-top: 1px solid var(--rule); align-items: baseline; }
+    .source-row:first-child { border-top: 2px solid var(--ink); }
+    .source-row h3 { font-size: 21px; }
+    .source-row p { font-size: 16px; color: var(--muted); }
+    .source-row code, .source-row a { font-size: 12px; overflow-wrap: anywhere; }
+    .trace-list { margin-top: 35px; display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--ink); border-left: 1px solid var(--ink); }
+    .trace-item { min-height: 108px; padding: 16px 22px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 44px 1fr; gap: 16px; }
+    .trace-item .tn { color: var(--blue); font-size: 22px; font-weight: 800; }
+    .trace-item h3 { font-size: 20px; }
+    .trace-item p { font-size: 14px; line-height: 1.35; color: var(--muted); margin-top: 6px; }
+
+    /* player */
+    #progress { position: fixed; left: 0; bottom: 0; height: 4px; width: 0; background: var(--blue); transition: width .18s ease; z-index: 20; }
+    #counter { position: fixed; right: 17px; top: 13px; color: rgba(255,255,255,.7); font: 12px/1 ui-monospace, monospace; z-index: 20; }
+    #notes { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(940px, calc(100vw - 36px)); max-height: 32vh; overflow: auto; background: rgba(7,10,15,.97); color: #e8ecf3; padding: 18px 22px; border-top: 4px solid var(--blue); display: none; z-index: 30; font-size: 16px; line-height: 1.55; box-shadow: 0 18px 70px rgba(0,0,0,.45); }
+    #notes.show { display: block; }
+    #help { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0,0,0,.68); z-index: 40; }
+    #help.show { display: grid; }
+    #help .box { width: 620px; background: white; padding: 34px 38px; }
+    #help h3 { font-size: 30px; }
+    #help p { margin-top: 16px; font-size: 18px; color: var(--muted); }
+    #overview { position: fixed; inset: 0; padding: 30px; overflow: auto; display: none; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 22px; background: #151922; z-index: 25; }
+    #overview.show { display: grid; }
+    .thumb { aspect-ratio: 16/9; background: white; padding: 18px; cursor: pointer; position: relative; }
+    .thumb .tn { color: var(--blue); font-weight: 800; font-size: 13px; }
+    .thumb h4 { margin: 24px 0 0; font-size: 24px; line-height: 1.2; }
+    .thumb.active-thumb { outline: 5px solid var(--blue); }
+    .notes { display: none; }
+
+    @media print {
+      html, body { overflow: visible; background: white; }
+      #viewport, #deck { display: block; position: static; width: auto; height: auto; transform: none !important; box-shadow: none; }
+      .slide { display: block !important; position: relative; width: 1280px; height: 720px; page-break-after: always; }
+      #progress, #counter, #notes, #help, #overview { display: none !important; }
+      @page { size: 13.333in 7.5in; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <main id="deck" aria-label="一个 PyTorch 算子的一生">
+
+      <section class="slide cover" data-title="一个 PyTorch 算子的一生">
+        <div class="eyebrow">PYTORCH · OPERATOR LIFECYCLE</div>
+        <h1>一个 PyTorch<br>算子的一生</h1>
+        <p class="subtitle">从 <span class="mono">native_functions.yaml</span> 到 CUDA 线程</p>
+        <div class="cover-flow" aria-hidden="true">
+          <div class="step">声明 · Contract</div>
+          <div class="step">生成 · Compile</div>
+          <div class="step">装配 · Register</div>
+          <div class="step">执行 · Dispatch</div>
+        </div>
+        <div class="footer"><span>组内技术分享</span><span></span></div>
+        <aside class="notes">开场先说明这不是一次“源码调用栈导览”，而是在回答：PyTorch 如何把一个算子从声明变成可扩展、可组合、低成本执行的系统。整场以 add.Tensor 为贯穿案例。</aside>
+      </section>
+
+      <section class="slide" data-title="先看全局：算子的一生跨越三个时间尺度">
+        <div class="phase-line compile"></div>
+        <div class="eyebrow">OVERVIEW 01 · THREE TIMESCALES</div>
+        <h2>先看全局：算子的一生跨越三个时间尺度</h2>
+        <div class="timescales">
+          <div class="timescale"><div class="n">01</div><h3>编译时</h3><p>读取声明，生成接口、注册代码与 backend wrapper。</p><div class="artifact">YAML → torchgen → C++</div></div>
+          <div class="timescale"><div class="n">02</div><h3>加载时</h3><p>Schema 与 Kernel 汇入同一个全局 Dispatcher，形成每个算子的查询表。</p><div class="artifact">m.def + m.impl → OperatorEntry</div></div>
+          <div class="timescale"><div class="n">03</div><h3>调用时</h3><p>根据调用语境逐层选择语义实现，最终落到 backend、dtype 与 GPU launch。</p><div class="artifact">KeySet → Kernel → Threads</div></div>
+        </div>
+        <div class="footer"><span>总览：生成 · 装配 · 执行</span><span></span></div>
+        <aside class="notes">这是第一张总览。强调三个阶段处理的是三种不同不确定性：编译时解决重复胶水；加载时解决开放注册；调用时解决动态语境。后面每页都会落在其中一个阶段。</aside>
+      </section>
+
+      <section class="slide" data-title="再看路径：torch.add 穿过七道边界">
+        <div class="phase-line compile"></div>
+        <div class="eyebrow">OVERVIEW 02 · END-TO-END ROUTE</div>
+        <h2>再看路径：<span class="mono">torch.add</span> 从声明到 GPU 穿过七道边界</h2>
+        <div class="route">
+          <div class="route-node"><div class="rn">01</div><h3>YAML</h3><p>定义身份、变体、后端与生成策略</p><div class="phase">COMPILE</div></div>
+          <div class="route-node"><div class="rn">02</div><h3>torchgen</h3><p>把契约投影成多种生成物</p><div class="phase">COMPILE</div></div>
+          <div class="route-node"><div class="rn">03</div><h3>Registry</h3><p>把 Schema 与 Kernel 装进同一算子条目</p><div class="phase">LOAD</div></div>
+          <div class="route-node"><div class="rn">04</div><h3>Dispatcher</h3><p>读取 KeySet，选择当前职责</p><div class="phase">CALL</div></div>
+          <div class="route-node"><div class="rn">05</div><h3>Wrapper</h3><p>执行 meta，准备输出与 TensorIterator</p><div class="phase">BACKEND</div></div>
+          <div class="route-node"><div class="rn">06</div><h3>dtype</h3><p>选择具体 scalar_t 模板</p><div class="phase">KERNEL</div></div>
+          <div class="route-node"><div class="rn">07</div><h3>GPU</h3><p>按内存形态选择 launch policy</p><div class="phase">LAUNCH</div></div>
+        </div>
+        <div class="route-claim">这不是一条偶然形成的调用链，而是一组刻意设计的职责边界。</div>
+        <div class="footer"><span>总览：后续逐段放大</span><span></span></div>
+        <aside class="notes">第二张总览让受众先记住七个站点。分享中每进入一段，可回指这里。注意 Dispatcher 和 dtype 是两级不同含义的分派：前者选择语义/后端职责，后者选择数值模板。</aside>
+      </section>
+
+      <section class="slide" data-title="2019 的地图仍有用，但机制已经换代">
+        <div class="eyebrow">CONTEXT · 2019 MAP, CURRENT MECHANISM</div>
+        <h2>2019 年的“两级分派”地图仍然有用，但外层机制已经换代</h2>
+        <div class="then-now">
+          <div class="era"><div class="year">EZYANG · 2019</div><h3>先 Type，再 dtype</h3><div class="era-flow">
+            <div class="era-row"><strong>Variable</strong><span>先处理自动微分包装</span></div>
+            <div class="era-row"><strong>Type dispatch</strong><span>按 device / layout 动态选择实现</span></div>
+            <div class="era-row"><strong>dtype switch</strong><span>在 kernel 内选择标量模板</span></div>
+          </div><div class="era-note">稳定的洞见：外层路由与内层数值特化是两回事。</div></div>
+          <div class="era now"><div class="year">CURRENT CHECKOUT</div><h3>有序语义栈，再 dtype</h3><div class="era-flow">
+            <div class="era-row"><strong>DispatchKeySet</strong><span>同时表达包装语义、布局与后端</span></div>
+            <div class="era-row"><strong>c10 Dispatcher</strong><span>最高优先级处理后可以 redispatch</span></div>
+            <div class="era-row"><strong>AT_DISPATCH</strong><span>进入后端后仍按 dtype 实例化模板</span></div>
+          </div><div class="era-note">已经变化：Variable/Tensor 合并，Type 虚调用被 Dispatcher 取代。</div></div>
+        </div>
+        <div class="footer"><span>参考：<a href="https://blog.ezyang.com/2019/05/pytorch-internals/">ezyang, PyTorch internals (2019)</a></span><span></span></div>
+        <aside class="notes">文章是很好的概念地图，但它自己也预告 Type dispatch 即将被替换。当前仓库的事实入口是 c10 Dispatcher。讲这页的目的不是纠错，而是把文章中的长期不变量与历史实现分开。</aside>
+      </section>
+
+      <section class="slide" data-title="一个统一 API 承受四个维度的组合爆炸">
+        <div class="eyebrow">THE MAIN CONTRADICTION</div>
+        <h2>真正的矛盾：一个统一 API，要承受四个维度的组合爆炸</h2>
+        <div class="dimensions">
+          <div class="dimension"><div class="dn">01</div><h3>接口变体</h3><p>functional、inplace、out 共享语义，却有不同输出契约。</p><div class="dimension-example">add · add_ · add.out</div></div>
+          <div class="dimension"><div class="dn">02</div><h3>执行世界</h3><p>Dense、Sparse、CPU、CUDA、Meta 等需要不同实现。</p><div class="dimension-example">layout × backend</div></div>
+          <div class="dimension"><div class="dn">03</div><h3>语义包装</h3><p>Autograd、Autocast、vmap、Functionalize 需要确定顺序。</p><div class="dimension-example">ordered layers</div></div>
+          <div class="dimension"><div class="dn">04</div><h3>数值与硬件</h3><p>dtype、连续性、向量宽度与 stream 决定最终代码。</p><div class="dimension-example">scalar_t × launch policy</div></div>
+        </div>
+        <div class="dimension-claim">设计目标不是消灭变化，而是让每个变化只出现在一个边界里。</div>
+        <div class="footer"><span>核心矛盾：统一体验 × 开放实现</span><span></span></div>
+        <aside class="notes">用乘法而不是加法理解复杂度。若把所有维度手写组合，会得到不可维护的笛卡尔积。PyTorch 的解法是把不同变化速度的维度分配给 YAML、codegen、registry、dispatcher 和 kernel 内特化。</aside>
+      </section>
+
+      <section class="slide" data-title="native_functions.yaml 是算子的源语言">
+        <div class="phase-line compile"></div>
+        <div class="eyebrow">COMPILE TIME · DECLARATIVE CONTRACT</div>
+        <h2><span class="mono">native_functions.yaml</span> 不是配置文件，而是算子的源语言</h2>
+        <div class="contract">
+          <div class="yaml"><span class="y-key">- func:</span> add.Tensor(...) -&gt; Tensor
+  <span class="y-key">structured_delegate:</span> add.out
+  <span class="y-key">variants:</span> function, method
+  <span class="y-key">dispatch:</span>
+    SparseCUDA: add_sparse
+
+<span class="y-key">- func:</span> add.out(..., Tensor(a!) out)
+  <span class="y-key">structured:</span> True
+  <span class="y-key">structured_inherits:</span> TensorIteratorBase
+  <span class="y-key">ufunc_inner_loop:</span> ...
+  <span class="y-dim"># 省略其余 backend 映射</span></div>
+          <div class="contract-list">
+            <div class="contract-row"><strong>Schema</strong><p>固定算子身份、输入输出、默认值、别名与变异语义。</p></div>
+            <div class="contract-row"><strong>dispatch</strong><p>声明哪些后端或布局需要专用实现。</p></div>
+            <div class="contract-row"><strong>structured</strong><p>告诉生成器如何复用 meta / impl 与三种 API 变体。</p></div>
+            <div class="contract-row"><strong>tags</strong><p>携带跨系统使用的算子属性，而不是塞进 kernel 代码。</p></div>
+          </div>
+        </div>
+        <div class="footer"><span>单一事实源：aten/src/ATen/native/native_functions.yaml</span><span></span></div>
+        <aside class="notes">此页只展示足以说明结构的 YAML，不做字段大全。当前 checkout 的 add.Tensor、add_.Tensor 都 structured_delegate 到 add.out；add.out 标记 structured，并继承 TensorIteratorBase。</aside>
+      </section>
+
+      <section class="slide" data-title="torchgen 把一份契约投影成多种接口">
+        <div class="phase-line compile"></div>
+        <div class="eyebrow">COMPILE TIME · CODE GENERATION</div>
+        <h2><span class="mono">torchgen</span> 的本质：把一份契约投影成多种接口</h2>
+        <div class="compiler-map">
+          <div class="compiler-core"><h3>torchgen<br>+ generators</h3><p>解析 Schema、dispatch 与 structured 分组；用同一语义模型生成不同消费面的胶水。</p><div class="small">一份声明，多份视图</div></div>
+          <div class="projections">
+            <div class="projection"><div class="pk">LANGUAGE SURFACE</div><h3>Python binding</h3><p>参数解析、重载选择、Python/C++ 对象转换。</p></div>
+            <div class="projection"><div class="pk">C++ SURFACE</div><h3>Functions / Tensor API</h3><p>稳定的 C++ 调用入口与类型签名。</p></div>
+            <div class="projection"><div class="pk">REGISTRATION</div><h3>m.def / m.impl</h3><p>Schema 注册、后端 wrapper 与 DispatchKey 映射。</p></div>
+            <div class="projection"><div class="pk">BACKEND ADAPTER</div><h3>Structured wrapper</h3><p>把 functional / inplace / out 拼装到同一 meta + impl。</p></div>
+          </div>
+        </div>
+        <div class="footer"><span>生成代码不是噪音，而是架构的展开结果</span><span></span></div>
+        <aside class="notes">源码锚点：torchgen/gen.py 的 RegisterSchema、ComputeOperators、ComputeFunction；torchgen/dest/register_dispatch_key.py 生成 backend wrapper 与注册；tools/autograd/gen_python_functions.py 生成 Python bindings。强调 codegen 的价值不是少写几行，而是保证所有调用面服从同一契约。</aside>
+      </section>
+
+      <section class="slide" data-title="structured kernel 分开结果规划与数值计算">
+        <div class="phase-line compile"></div>
+        <div class="eyebrow">COMPILE TIME · STRUCTURED DESIGN</div>
+        <h2>Structured kernel 把“结果长什么样”与“数值怎么算”分开</h2>
+        <div class="structured">
+          <div class="structured-side"><div class="sk">META</div><h3>规划结果</h3><p>校验形状、广播与 dtype 规则；决定输出 sizes、strides、options，并准备 TensorIterator。</p><div class="variants"><div class="variant">add</div><div class="variant">add_</div><div class="variant">add.out</div></div></div>
+          <div class="structured-bridge">→</div>
+          <div class="structured-side impl"><div class="sk">IMPL</div><h3>执行数值</h3><p>接收已标准化的输入、输出和迭代计划；只负责调用当前后端的数值实现。</p><div class="variants"><div class="variant">CPU</div><div class="variant">CUDA</div><div class="variant">XPU</div></div></div>
+        </div>
+        <div class="footer"><span>复用的是语义规划，不是勉强复用一段 kernel</span><span></span></div>
+        <aside class="notes">用户笔记里的“同一个 meta 加各后端 impl，自动拼装 functional/inplace/out”方向正确。更精确地说：structured out 作为核心分组，functional 和 inplace 通过 structured_delegate 共享生成逻辑；不同 wrapper 对输出的创建、校验和复用方式不同。</aside>
+      </section>
+
+      <section class="slide" data-title="加载时把 Schema 与 Kernel 装配成可查询世界">
+        <div class="phase-line load"></div>
+        <div class="eyebrow">LOAD TIME · REGISTRY ASSEMBLY</div>
+        <h2>加载时，<span class="mono">m.def</span> 与 <span class="mono">m.impl</span> 把生成物装配成可查询的世界</h2>
+        <div class="registry">
+          <div class="registrations">
+            <div class="reg"><code class="mono">m.def("add.Tensor...")</code><p>注册“它是谁”：唯一 Schema 与算子身份。</p></div>
+            <div class="reg"><code class="mono">m.impl("add.Tensor", ...)</code><p>注册“谁来做”：DispatchKey 到 KernelFunction。</p></div>
+            <div class="reg"><code class="mono">backend fallback</code><p>为某个 key 提供跨算子的默认行为。</p></div>
+          </div>
+          <div class="entry"><div class="entry-top"><h3 class="mono">aten::add.Tensor</h3><span>OperatorEntry</span></div>
+            <div class="entry-row"><strong>schema_</strong><p>稳定契约：参数、返回值、alias、mutation。</p></div>
+            <div class="entry-row"><strong>kernels_</strong><p>直接注册、alias key 与调试元数据的规范状态。</p></div>
+            <div class="entry-row"><strong>dispatchTable_</strong><p>注册期算好的 runtime 表；调用时按索引直接查。</p></div>
+            <div class="entry-row"><strong>extractor</strong><p>知道该算子哪些参数参与 key 提取，以及哪些 key 可 fallthrough。</p></div>
+          </div>
+        </div>
+        <div class="footer"><span>设计取舍：把复杂规则前移到冷路径</span><span></span></div>
+        <aside class="notes">当前代码路径：Library::_def → Dispatcher::registerDef → OperatorEntry::registerSchema；Library::_impl → Dispatcher::registerImpl → OperatorEntry::registerKernel。OperatorEntry 在注册变化时刷新 dispatchTable_，让热路径保持位运算与数组查询。</aside>
+      </section>
+
+      <section class="slide" data-title="语言边界很快消失，只剩算子身份">
+        <div class="phase-line call"></div>
+        <div class="eyebrow">CALL TIME · FROM PYTHON TO OPERATOR IDENTITY</div>
+        <h2>调用进入 C++ 后，语言边界很快消失，只剩一个稳定的算子身份</h2>
+        <div class="boundary">
+          <div class="boundary-step"><div class="bn">01</div><h3>PythonArgParser</h3><p>解析参数、默认值与重载；处理 <span class="mono">__torch_function__</span> 入口。</p><div class="artifact mono">THPVariable_add</div></div>
+          <div class="boundary-step"><div class="bn">02</div><h3>Tensor C++ API</h3><p>Python 对象被解包为 <span class="mono">at::Tensor</span>，GIL 释放后进入普通 C++。</p><div class="artifact mono">self.add(...)</div></div>
+          <div class="boundary-step"><div class="bn">03</div><h3>Operators API</h3><p>名称与 overload 被固化为类型安全入口，不再做字符串式动态搜索。</p><div class="artifact mono">_ops::add_Tensor::call</div></div>
+          <div class="boundary-step"><div class="bn">04</div><h3>Typed handle</h3><p>首次按 name + overload 找到 handle；静态缓存后直接进入 Dispatcher。</p><div class="artifact mono">op.call(...)</div></div>
+        </div>
+        <div class="footer"><span>边界原则：尽早把动态语言问题变成稳定 C++ 契约</span><span></span></div>
+        <aside class="notes">当前生成代码证据：python_torch_functions_2.cpp 中 THPVariable_add 使用 PythonArgParser，调用 self.add；TensorBody.h 的 Tensor::add 调到 _ops::add_Tensor::call；Operators_2.cpp 创建并缓存 TypedOperatorHandle。</aside>
+      </section>
+
+      <section class="slide" data-title="Dispatcher 读取的是调用语境，而不只是 device">
+        <div class="phase-line call"></div>
+        <div class="eyebrow">CALL TIME · CONTEXT AS AN ORDERED KEYSET</div>
+        <h2>Dispatcher 读取的是调用语境，而不只是 <span class="mono">device</span></h2>
+        <div class="formula mono">KeySet = Tensor Keys <span class="op">∪</span> TLS Included <span class="op">−</span> TLS Excluded <span class="op">∩</span> Non-Fallthrough</div>
+        <div class="key-origins">
+          <div class="key-origin"><h3>Tensor Keys</h3><p>对象携带的 backend、layout 与包装能力。</p></div>
+          <div class="key-origin"><h3>TLS Included</h3><p>动态作用域主动开启的模式或默认职责。</p></div>
+          <div class="key-origin"><h3>TLS Excluded</h3><p>已完成的层暂时屏蔽自己，避免重复处理。</p></div>
+          <div class="key-origin"><h3>Fallthrough</h3><p>该算子在某一层无需工作，查找时直接跳过。</p></div>
+        </div>
+        <div class="footer"><span>输入不是“CUDA Tensor”，而是一组有优先级的能力</span><span></span></div>
+        <aside class="notes">当前 DispatchKeyExtractor 先从所有 Tensor 参数合并 key_set，再应用 TLS include/exclude 和该算子的 non-fallthrough mask。这里用交集表达 non-fallthrough。最终 OperatorEntry::lookup 由最高优先级计算表索引。</aside>
+      </section>
+
+      <section class="slide" data-title="最高优先级先兑现语义，再 redispatch">
+        <div class="phase-line call"></div>
+        <div class="eyebrow">CALL TIME · PEEL ONE RESPONSIBILITY</div>
+        <h2>最高优先级先兑现语义，再 <span class="mono">redispatch</span> 给下一层</h2>
+        <div class="semantic">
+          <div class="stack">
+            <div class="stack-row"><span>Python / front modes</span><span>higher</span></div>
+            <div class="stack-row"><span>vmap / wrappers</span><span>intercept</span></div>
+            <div class="stack-row active"><span>Autocast</span><span>current</span></div>
+            <div class="stack-row"><span>Autograd</span><span>pending</span></div>
+            <div class="stack-row"><span>Functionalize</span><span>pending</span></div>
+            <div class="stack-row backend"><span>CUDA backend</span><span>numeric</span></div>
+          </div>
+          <div>
+            <div class="peel-step"><div class="pn">1</div><div><h3>选择当前职责</h3><p>取最高优先级 key；它不一定是最终数值 kernel。</p></div></div>
+            <div class="peel-step"><div class="pn">2</div><div><h3>完成本层工作</h3><p>转换参数、记录 Autograd 元数据，或规范化语义。</p></div></div>
+            <div class="peel-step"><div class="pn">3</div><div><h3>显式交棒</h3><p>带着剩余 KeySet 继续查表，最终才抵达 CUDA。</p></div></div>
+          </div>
+        </div>
+        <div class="footer"><span>一个调用可以命中多个 kernel：它是一条职责链</span><span></span></div>
+        <aside class="notes">与 2019 年 Variable → Type 的单向模型相比，当前 Dispatcher 把多种语义统一为有序层。Dispatcher::redispatch 接收已经调整过的 KeySet，直接继续 lookup，不重新从原始 Tensor 计算。</aside>
+      </section>
+
+      <section class="slide" data-title="CUDA wrapper 先标准化问题，再交给 impl">
+        <div class="phase-line kernel"></div>
+        <div class="eyebrow">BACKEND · STRUCTURED CUDA WRAPPER</div>
+        <h2>进入 CUDA 后，wrapper 先把问题标准化，再交给数值实现</h2>
+        <div class="wrapper-flow">
+          <div class="wrapper-step"><div class="wn">01 · CREATE</div><h3>构造 structured op</h3><p>functional wrapper 准备输出容器与设备 guard；out / inplace wrapper 采用不同输出策略。</p><div class="result mono">structured_..._functional</div></div>
+          <div class="wrapper-step"><div class="wn">02 · META</div><h3>规划输出与迭代</h3><p>广播、shape、dtype promotion、输出分配与 TensorIterator 配置在这里收敛。</p><div class="result mono">op.meta(...)</div></div>
+          <div class="wrapper-step"><div class="wn">03 · IMPL</div><h3>进入后端计算</h3><p>impl 得到标准化问题和确定的输出，只需调用 CUDA 数值路径。</p><div class="result mono">op.impl(...)</div></div>
+        </div>
+        <div class="footer"><span>wrapper 是契约适配器，不是业务算法</span><span></span></div>
+        <aside class="notes">当前生成的 RegisterCUDA_0.cpp 中，wrapper_CUDA_add_Tensor 创建 structured_ufunc_add_CUDA_functional，调用 op.meta，再调用 op.impl，并返回 outputs_[0]。这验证了用户笔记的主路径。</aside>
+      </section>
+
+      <section class="slide" data-title="第二级分派在 backend 内按 dtype 发生">
+        <div class="phase-line kernel"></div>
+        <div class="eyebrow">KERNEL · THE SECOND DISPATCH</div>
+        <h2>第二级分派发生在 backend 内：<span class="mono">dtype</span> 决定模板实例</h2>
+        <div class="dispatch-levels">
+          <div class="dispatch-level"><div class="dk">OUTER DISPATCH</div><h3>Dispatcher 选择 CUDA</h3><p>问题仍是“谁负责”：语义层、布局与 backend 的组合。</p><div class="choice mono">DispatchKey → wrapper_CUDA_add_Tensor</div></div>
+          <div class="dispatch-arrow">→</div>
+          <div class="dispatch-level dtype"><div class="dk">INNER DISPATCH</div><h3>AT_DISPATCH 选择 scalar_t</h3><p>问题变成“用什么标量代码”：Bool、Half、Float、Double、Complex…</p><div class="choice mono">common_dtype → CUDAFunctor_add&lt;scalar_t&gt;</div></div>
+        </div>
+        <div class="footer"><span>设计边界：dtype 不进入全局 Dispatcher 的组合空间</span><span></span></div>
+        <aside class="notes">这是 ezyang 文章中最值得长期保留的心智模型。当前 UfuncCUDA_add.cu 仍然通过 AT_DISPATCH_SWITCH(iter.common_dtype()) 选择 scalar_t，然后调用 gpu_kernel。外层 Dispatcher 与内层 dtype switch 服务不同扩展维度。</aside>
+      </section>
+
+      <section class="slide" data-title="gpu_kernel 按内存形态选择 launch policy">
+        <div class="phase-line kernel"></div>
+        <div class="eyebrow">KERNEL · MEMORY-AWARE LAUNCH</div>
+        <h2><span class="mono">gpu_kernel</span> 的最后一公里：按内存形态选择 launch policy</h2>
+        <div class="launches">
+          <div class="launch"><div class="lk">CONTIGUOUS</div><h3>向量化路径</h3><p>连续数据允许合并访存；运行时根据可向量化宽度选择 specialization。</p><div class="decision mono">launch_vectorized_kernel</div></div>
+          <div class="launch"><div class="lk">STRIDED</div><h3>偏移计算路径</h3><p>非连续 Tensor 通过 offset calculator，把逻辑索引映射到真实地址。</p><div class="decision mono">offset calculator</div></div>
+          <div class="launch"><div class="lk">GENERAL</div><h3>unrolled / legacy 路径</h3><p>根据类型大小、索引范围和平台选择展开因子、block 与 grid。</p><div class="decision mono">current CUDA stream</div></div>
+        </div>
+        <div class="launch-claim">越接近硬件，算子身份越不重要；内存布局与并行策略越重要。</div>
+        <div class="footer"><span>当前代码并非固定一个 elementwise_kernel，而是多种 launch policy</span><span></span></div>
+        <aside class="notes">这里修正笔记里较理想化的固定 grid/block → elementwise_kernel 图。当前 CUDALoops.cuh 会根据连续性、32 位索引、向量宽度等走 vectorized、unrolled 或 offset-aware 路径，并使用当前 CUDA stream。</aside>
+      </section>
+
+      <section class="slide" data-title="每一层都在缩小问题空间">
+        <div class="eyebrow">SYNTHESIS · PROGRESSIVE NARROWING</div>
+        <h2>回到全景：每一层都在缩小问题空间</h2>
+        <div class="shrink-table">
+          <div class="shrink-head"><div>阶段</div><div>输入仍然不确定什么</div><div>本层做出的决定</div><div>交给下一层什么</div></div>
+          <div class="shrink-row"><h3>YAML / torchgen</h3><p>有哪些调用面与后端</p><p>生成一致的接口、wrapper 与注册代码</p><div class="out">一组可装配的生成物</div></div>
+          <div class="shrink-row"><h3>Registry</h3><p>哪些实现最终可用</p><p>把 Schema、direct kernel、alias 与 fallback 归并</p><div class="out">每个算子的 runtime table</div></div>
+          <div class="shrink-row"><h3>Dispatcher</h3><p>本次调用处于什么语境</p><p>按优先级依次兑现语义与 backend 职责</p><div class="out">确定的 backend wrapper</div></div>
+          <div class="shrink-row"><h3>Meta / impl</h3><p>输出与迭代形态</p><p>规划 shape、dtype、输出与 TensorIterator</p><div class="out">标准化的数值问题</div></div>
+          <div class="shrink-row"><h3>dtype / launch</h3><p>具体标量与内存路径</p><p>选择模板、向量宽度、grid、block、stream</p><div class="out">GPU 上的真实指令</div></div>
+        </div>
+        <div class="footer"><span>总览回收：从开放世界逐步收敛到确定执行</span><span></span></div>
+        <aside class="notes">这页把第二张总览升级为职责表。每层的设计价值，可以用“消除了哪一种不确定性”来判断。推荐在结束前用 1 分钟快速走一遍。</aside>
+      </section>
+
+      <section class="slide closing" data-title="算子下发是一套分阶段编译与解释系统">
+        <div class="eyebrow">TAKEAWAY</div>
+        <h2>算子下发不是一条长调用链，<br>而是一套<span class="accent">分阶段编译与解释系统</span>。</h2>
+        <div class="principles">
+          <div class="principle"><div class="dot"></div><div>声明与胶水分离：Schema 是源，torchgen 是编译器</div></div>
+          <div class="principle"><div class="dot"></div><div>身份与实现分离：OperatorEntry 把开放注册收敛为稳定查询</div></div>
+          <div class="principle"><div class="dot"></div><div>语义与数值分离：Dispatcher 管职责，dtype / launch 管硬件特化</div></div>
+        </div>
+        <div class="last">看懂“边界为什么存在”，比背下调用栈更重要。</div>
+        <div class="footer"><span>END</span><span></span></div>
+        <aside class="notes">回扣开场。完整链条之所以可维护，不是因为每层简单，而是因为每层只承担一种变化。答疑时再进入后两页源码地图。</aside>
+      </section>
+
+      <section class="slide" data-title="附录：当前仓库的事实锚点">
+        <div class="eyebrow">APPENDIX A · SOURCE MAP</div>
+        <h2>当前仓库的事实锚点</h2>
+        <div class="source-map">
+          <div class="source-row"><h3>概念地图</h3><p>Tensor 的 device / layout / dtype 与两级分派心智模型。</p><a href="https://blog.ezyang.com/2019/05/pytorch-internals/">blog.ezyang.com/2019/05/pytorch-internals/</a></div>
+          <div class="source-row"><h3>算子声明</h3><p>add.Tensor、add_.Tensor、add.out、structured 与 ufunc 配置。</p><code>aten/src/ATen/native/native_functions.yaml</code></div>
+          <div class="source-row"><h3>生成器</h3><p>Schema、Operators API、Python binding、backend wrapper 与注册代码生成。</p><code>torchgen/gen.py · register_dispatch_key.py · tools/autograd/gen_python_functions.py</code></div>
+          <div class="source-row"><h3>装配与分派</h3><p>m.def / m.impl、OperatorEntry、KeySet 提取、lookup 与 redispatch。</p><code>ATen/core/Library.cpp · dispatch/Dispatcher.h · OperatorEntry.cpp</code></div>
+          <div class="source-row"><h3>CUDA 路径</h3><p>structured wrapper、dtype switch、gpu_kernel 与 launch policy。</p><code>build/aten/.../RegisterCUDA_0.cpp · UfuncCUDA_add.cu · CUDALoops.cuh</code></div>
+          <div class="source-row"><h3>学习笔记</h3><p>本分享的 add 追踪主线、生成物与调用路径输入。</p><code>用户提供的 pasted-text.txt</code></div>
+        </div>
+        <div class="footer"><span class="appendix">答疑备用</span><span></span></div>
+        <aside class="notes">代码事实以当前 checkout 为准；文章用来提供概念地图。生成目录中的文件是当前工作区已有构建产物，不要求听众在源码树里凭文件名搜索未生成内容。</aside>
+      </section>
+
+      <section class="slide" data-title="附录：追踪任意算子的七个锚点">
+        <div class="eyebrow">APPENDIX B · TRACE PLAYBOOK</div>
+        <h2>追踪任意算子，不必读完整调用栈；找七个锚点</h2>
+        <div class="trace-list">
+          <div class="trace-item"><div class="tn">1</div><div><h3>先找 Schema</h3><p>native_functions.yaml：身份、变体、structured、dispatch。</p></div></div>
+          <div class="trace-item"><div class="tn">2</div><div><h3>再看生成入口</h3><p>ops/&lt;op&gt;_ops.h 与 Operators_*.cpp：call / redispatch。</p></div></div>
+          <div class="trace-item"><div class="tn">3</div><div><h3>确认注册结果</h3><p>RegisterSchema.cpp 与 Register&lt;Key&gt;_*.cpp：m.def / m.impl。</p></div></div>
+          <div class="trace-item"><div class="tn">4</div><div><h3>列出候选 KeySet</h3><p>Tensor keys、TLS、fallthrough；先判断包装层还是 backend。</p></div></div>
+          <div class="trace-item"><div class="tn">5</div><div><h3>检查 wrapper</h3><p>如果 structured：区分输出策略、meta 与 impl。</p></div></div>
+          <div class="trace-item"><div class="tn">6</div><div><h3>找到 dtype switch</h3><p>AT_DISPATCH_* 决定支持集合和 scalar_t 实例。</p></div></div>
+          <div class="trace-item"><div class="tn">7</div><div><h3>最后看 launcher</h3><p>TensorIterator、连续性、索引宽度、向量化与 stream。</p></div></div>
+          <div class="trace-item"><div class="tn">✓</div><div><h3>始终问一个问题</h3><p>这一层消除了哪一种不确定性？若回答不了，可能看得太细。</p></div></div>
+        </div>
+        <div class="footer"><span class="appendix">答疑备用</span><span></span></div>
+        <aside class="notes">这是一张实战清单。它故意绕过大量生成胶水，只抓架构边界。对于 composite、manual_cpp_binding 或特殊 backend，路径会分叉，但七问仍然能帮助定位分叉发生在哪一层。</aside>
+      </section>
+    </main>
+  </div>
+
+  <div id="progress"></div>
+  <div id="counter"></div>
+  <div id="notes" role="status"></div>
+  <div id="help"><div class="box"><h3>快捷键</h3><p>← / → 或 Space：翻页<br>Home / End：首尾页<br>N：讲者备注<br>O：总览<br>?：帮助<br>F：全屏<br>浏览器打印：输出 16:9 PDF</p></div></div>
+  <div id="overview"></div>
+
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const deck = document.getElementById('deck');
+      const progress = document.getElementById('progress');
+      const counter = document.getElementById('counter');
+      const notes = document.getElementById('notes');
+      const help = document.getElementById('help');
+      const overview = document.getElementById('overview');
+      let index = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+
+      function fit() {
+        const scale = Math.min(innerWidth / 1280, innerHeight / 720);
+        deck.style.transform = `scale(${scale})`;
+      }
+      function buildOverview() {
+        overview.innerHTML = '';
+        slides.forEach((slide, i) => {
+          const thumb = document.createElement('div');
+          thumb.className = 'thumb' + (i === index ? ' active-thumb' : '');
+          thumb.innerHTML = `<div class="tn">${String(i + 1).padStart(2, '0')}</div><h4>${slide.dataset.title}</h4>`;
+          thumb.onclick = () => { index = i; overview.classList.remove('show'); render(); };
+          overview.appendChild(thumb);
+        });
+      }
+      function render() {
+        slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+        location.hash = String(index + 1);
+        progress.style.width = `${((index + 1) / slides.length) * 100}%`;
+        counter.textContent = `${String(index + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
+        const note = slides[index].querySelector('.notes');
+        notes.textContent = note ? note.textContent : '';
+        document.title = `${slides[index].dataset.title} · PyTorch 算子的一生`;
+        if (overview.classList.contains('show')) buildOverview();
+      }
+      function move(delta) {
+        index = Math.max(0, Math.min(slides.length - 1, index + delta));
+        render();
+      }
+      function toggleFullscreen() {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+        else document.exitFullscreen?.();
+      }
+
+      addEventListener('resize', fit);
+      addEventListener('hashchange', () => {
+        const next = (parseInt(location.hash.slice(1), 10) || 1) - 1;
+        if (next !== index && next >= 0 && next < slides.length) { index = next; render(); }
+      });
+      addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') { event.preventDefault(); move(1); }
+        else if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); move(-1); }
+        else if (event.key === 'Home') { index = 0; render(); }
+        else if (event.key === 'End') { index = slides.length - 1; render(); }
+        else if (event.key.toLowerCase() === 'n') notes.classList.toggle('show');
+        else if (event.key.toLowerCase() === 'o') { overview.classList.toggle('show'); buildOverview(); }
+        else if (event.key === '?') help.classList.toggle('show');
+        else if (event.key === 'Escape') { help.classList.remove('show'); overview.classList.remove('show'); notes.classList.remove('show'); }
+        else if (event.key.toLowerCase() === 'f') toggleFullscreen();
+      });
+      help.addEventListener('click', () => help.classList.remove('show'));
+      fit();
+      render();
+      buildOverview();
+    })();
+  </script>
+</body>
+</html>
