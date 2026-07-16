@@ -13,7 +13,7 @@
 | 3 | 排查并限速日志风暴源头 | 视情况 | 用 `*_ratelimited()`、tracepoint 或计数器替代高频 `printk()` |
 | 4 | 去掉串口 console，例如移除 `console=ttyAMA0,115200`，保留 `console=tty0` | 是 | 仅适合已有 journal/kdump/pstore/远端日志链路且不依赖串口实时日志的生产环境 |
 
-串口的主要价值是早期启动、panic/oops、网络不可用时的带外救援和硬件 bring-up。是否能关闭串口 console，不取决于是不是网络引导或无盘 OS，而取决于故障发生窗口里有没有可靠替代日志出口。回片联调、FPGA/EVB bring-up、bootloader/early kernel、用户态未起来、网络/存储本身是调试对象、panic/oops 前后没有可靠 kdump/pstore/netconsole/远端日志时，不建议关闭串口 console；这种场景优先降低 console loglevel、提高波特率、扩大 `log_buf_len`、清理日志风暴并给高频日志加限速。生产环境通常不会让串口打印所有级别日志；全量日志应通过 `/dev/kmsg`、journald、rsyslog、日志 agent、kdump 或 pstore 保存。
+串口的主要价值是早期启动、panic/oops、网络不可用时的带外救援和硬件 bring-up。对回片联调、FPGA/EVB bring-up、bootloader/early kernel、用户态未起来、网络/存储本身是调试对象、panic/oops 前后缺少可靠 kdump/pstore/netconsole/远端日志等必须使用串口保存日志的场景，建议保留串口 console，同时降低 console loglevel、提高波特率、扩大 `log_buf_len`、清理日志风暴并给高频日志加限速。生产环境通常不会让串口打印所有级别日志；全量日志应通过 `/dev/kmsg`、journald、rsyslog、日志 agent、kdump 或 pstore 保存。
 
 ## 背景
 
