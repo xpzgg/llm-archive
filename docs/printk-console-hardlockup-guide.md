@@ -1,8 +1,8 @@
-# 串口 Console 打印导致 Hardlockup 排障指南
+# 串口 Console 打印导致 Lockup 排障指南
 
 ## TL;DR
 
-串口 console 是低带宽的调试和救援通道，不适合作为生产环境的全量内核日志输出通道；当内核日志量很大时，`printk()` 可能在中断上下文里同步刷慢速串口，导致 CPU 长时间关中断忙等，最终被 hardlockup watchdog 判定为卡死。
+串口 console 是低带宽的调试和救援通道，不适合作为生产环境的全量内核日志输出通道；当内核日志量很大时，`printk()` 同步刷慢速串口会长时间占用 CPU，常见结果是 soft lockup 或 RCU stall。只有当打印发生在中断上下文、关中断区域或其他原子上下文，并触发 `console_unlock()` 批量 flush backlog 时，才更容易进一步放大成 hard lockup。
 
 推荐处置优先级：
 
@@ -68,7 +68,7 @@
 - 1 个字节通常需要 10 bit 传输，实际吞吐约 `115200 / 10 = 11520` 字节/秒；
 - 约等于 11 KB/s；
 - 10 秒只能传约 112 KB；
-- 一段 RCU stall、softlockup、modules list、寄存器和 backtrace 很容易达到数 KB 到数十 KB。
+- 一段 RCU stall、soft lockup、modules list、寄存器和 backtrace 很容易达到数 KB 到数十 KB。
 
 因此，串口可以兜底输出关键日志，但不适合承载大量 `INFO`、`DEBUG` 或日志风暴。
 
@@ -105,7 +105,40 @@ printk()
 
 如果调用者原本就在中断上下文里，本地 IRQ 进入前已经是 disabled，那么每条 record 结束后的 `local_irq_restore()` 只会恢复到原来的 disabled 状态，并不会在两条日志之间真正打开普通 IRQ。
 
-### 4. 慢串口如何放大成 Hardlockup
+## 串口打印可能导致哪些问题
+
+### 1. Soft Lockup：最常见
+
+soft lockup 的含义是 CPU 长时间没有发生调度。慢串口 console 最容易触发这一类问题：CPU 还在运行，也还能响应中断，但长时间忙于同步输出日志，迟迟不能回到正常调度路径。
+
+典型现象：
+
+```text
+watchdog: BUG: soft lockup - CPU#X stuck for Ys!
+...
+console_unlock
+console_flush_all
+console_emit_next_record
+pl011_console_write
+```
+
+这类情况通常说明串口输出太慢或日志量太大，不等价于 CPU 完全死锁。
+
+### 2. RCU Stall：经常伴随出现
+
+RCU stall 的含义是 RCU grace period 长时间没有推进。慢 console 输出可能让某个 CPU 长时间停留在内核路径、关抢占路径或中断路径中，导致 RCU 看不到 quiescent state，于是打印 stall 报告。
+
+典型现象：
+
+```text
+rcu: INFO: rcu_sched detected stalls on CPUs/tasks:
+```
+
+需要注意：RCU stall 报告本身也会产生大量 `printk()`。如果这些日志继续同步刷到串口，可能进一步制造更多 console backlog，形成“打印 stall 报告 -> 刷慢串口 -> stall 更严重”的放大链路。
+
+### 3. Hard Lockup：只在特定上下文下放大出现
+
+hard lockup 一般表示 CPU 长时间没有正常响应 watchdog 进展。串口打印导致 hard lockup 的关键条件不是“串口慢”本身，而是慢串口输出发生在中断上下文、关中断区域或其他不能调度/不能及时响应 tick 的上下文里。
 
 本问题常见于以下链路：
 
@@ -134,80 +167,21 @@ while (pl011_read(uap, REG_FR) & UART01x_FR_TXFF)
 pl011_write(ch, uap, REG_DR);
 ```
 
-一条日志输出结束后，driver 还会等 UART busy 状态清掉。日志量大或串口很慢时，CPU 虽然仍在执行 `cpu_relax()`，但普通 timer interrupt 和调度时钟无法推进。ARM64 上 SDEI/NMI-like watchdog 仍可打进来，发现 watchdog 进展停滞，于是报告 hardlockup。
+一条日志输出结束后，driver 还会等 UART busy 状态清掉。日志量大或串口很慢时，CPU 虽然仍在执行 `cpu_relax()`，但普通 timer interrupt 和调度时钟无法推进。ARM64 上 SDEI/NMI-like watchdog 仍可打进来，发现 watchdog 进展停滞，于是报告 hard lockup。
 
-这类 hardlockup 不一定表示 CPU 在业务代码里真正死锁，也不必然说明串口硬件损坏；它通常表示“慢 console 同步输出在不合适的上下文中占用了太久”。
+这类 hard lockup 不一定表示 CPU 在业务代码里真正死锁，也不必然说明串口硬件损坏；它通常表示“慢 console 同步输出在不合适的上下文中占用了太久”。
 
-### 5. 典型触发场景
+### 4. 典型触发场景
 
 - 硬件 RAS/CE 错误风暴，内核持续打印错误；
 - 驱动进入异常状态，循环 `printk()` 或 `dev_err()`；
 - 生产环境误开 debug、dynamic debug、`ignore_loglevel` 或高 console loglevel；
-- RCU stall、softlockup、hardlockup 报告互相放大，stall 报告本身又制造大量 console 输出；
+- RCU stall、soft lockup、hard lockup 报告互相放大，stall 报告本身又制造大量 console 输出；
 - 串口 console 低波特率，或 BMC SoL/串口链路非常慢。
 
-## 排查地图
+## 规避方式
 
-```
-出现 hardlockup / panic
-  |
-  v
-查看 hardlockup 栈里是否有 console/printk/pl011？
-  |
-  +-- 否 --> 优先按普通 hardlockup 排查：锁、关中断长路径、硬件/固件、NMI 屏蔽
-  |
-  +-- 是
-       |
-       v
-   当前是否注册了串口 console？
-       |
-       +-- 否 --> 看是否是 VGA/netconsole/其他 console 慢或 printk 风暴
-       |
-       +-- 是
-            |
-            v
-        是否存在日志风暴或大量 backlog？
-            |
-            +-- 是 --> 临时降低 console loglevel，排查日志源头，必要时禁用串口 console
-            |
-            +-- 不明显
-                 |
-                 v
-             小量日志也卡在 pl011_console_putchar？
-                 |
-                 +-- 是 --> 怀疑串口控制器、时钟、固件描述、BMC SoL 或硬件链路异常
-                 |
-                 +-- 否 --> 继续观察触发窗口，重点统计 console flush 耗时和日志量
-```
-
-## 问题分析和操作步骤
-
-### 1. 确认是否命中 Console 打印放大路径
-
-查看 panic 或 hardlockup 栈。如果看到以下函数组合，基本可以确认 hardlockup 与 console flush 强相关：
-
-```
-console_unlock
-console_flush_all
-console_emit_next_record
-pl011_console_write
-uart_console_write
-pl011_console_putchar
-```
-
-如果栈还包含：
-
-```
-hrtimer_interrupt
-rcu_sched_clock_irq
-check_cpu_stall
-print_other_cpu_stall
-printk
-```
-
-说明问题很可能是：RCU stall 检查在 timer interrupt 中打印日志，触发 `console_unlock()`，随后在 IRQ-off 上下文里批量刷慢串口。
-
-### 2. 查看当前 Console 配置
+### 1. 查看当前 Console 配置
 
 查看 kernel cmdline：
 
@@ -233,9 +207,92 @@ cat /sys/class/tty/console/active
 
 如果输出包含 `ttyAMA0`、`ttyS0` 等串口设备，说明运行期内核日志可能同步刷到串口。
 
-### 3. 临时降低 Console 打印级别
+### 2. 关闭串口 Console（推荐）
 
-查看当前设置：
+如果生产环境不依赖串口实时看内核日志，推荐从 cmdline 移除串口 console。
+
+将：
+
+```text
+console=ttyAMA0,115200 console=tty0
+```
+
+改为：
+
+```text
+console=tty0
+```
+
+或者根据现场情况保留非串口 console。修改内核启动参数后需要重启。
+
+效果：
+
+- `pl011_console_write()` 不再作为 console 输出路径被调用；
+- `printk()` 仍写入 ring buffer；
+- `dmesg`、`journalctl -k`、日志 agent 仍可读取内核日志；
+- 失去串口实时救援日志，需要依赖 kdump、pstore、BMC 其他能力或远端日志。
+
+### 3. 降低 Console 打印级别
+
+如果暂时不能重启或不能关闭串口 console，先降低 console loglevel，减少输出到串口的日志量。具体命令见下一章“打印级别查看与设置”。
+
+注意：降低 console loglevel 只能减少普通日志输出，不能完全消除风险。`panic`、`oops`、RCU stall、soft lockup、hard lockup 等严重路径仍可能产生大量高优先级日志。
+
+### 4. 确认日志仍可查看
+
+关闭串口 console 或降低 console loglevel 不等于删除内核日志。确认方式：
+
+```bash
+dmesg -T | tail -n 100
+journalctl -k -b | tail -n 100
+```
+
+查看 journald 是否持久化：
+
+```bash
+grep -E '^\s*Storage=' /etc/systemd/journald.conf /etc/systemd/journald.conf.d/*.conf 2>/dev/null
+```
+
+崩溃场景建议同时启用或确认：
+
+```bash
+kdumpctl status
+mount | grep pstore
+ls -l /sys/fs/pstore 2>/dev/null
+```
+
+### 5. 查找并限速日志风暴源头
+
+实时观察内核日志：
+
+```bash
+dmesg -w
+```
+
+按关键词统计近期高频日志：
+
+```bash
+dmesg -T | sed -E 's/^\[[^]]+\] //' | sort | uniq -c | sort -rn | head -30
+```
+
+查看是否存在 RAS、MCE、EDAC、AER、驱动错误风暴：
+
+```bash
+dmesg -T | grep -Ei 'ras|mce|edac|aer|error|fail|timeout|reset|stall|lockup' | tail -n 200
+```
+
+如果是驱动或模块自身重复打印，长期修复应改为限速接口：
+
+```c
+dev_warn_ratelimited(dev, "...\n");
+pr_err_ratelimited("...\n");
+```
+
+对于高频观测数据，优先使用 tracepoint、debugfs 计数器或 perf/ftrace，而不是在热路径直接 `printk()`。
+
+## 打印级别查看与设置
+
+### 1. 查看当前打印级别
 
 ```bash
 cat /proc/sys/kernel/printk
@@ -269,6 +326,8 @@ cat /proc/sys/kernel/printk
 | 6 | `KERN_INFO` | 一般信息 |
 | 7 | `KERN_DEBUG` | 调试信息 |
 
+### 2. 临时修改打印级别
+
 只让 `ERR` 及以上日志输出到 console：
 
 ```bash
@@ -290,7 +349,7 @@ sysctl -w kernel.printk="4 4 1 7"
 
 注意：`echo 5 > /proc/sys/kernel/printk` 表示 `0..4` 都会输出到 console，会包含 `WARNING`，不是通用意义上的“调低”。只有当前值大于 5 时，它才是在降低输出量。
 
-### 4. 持久降低 Console 打印级别
+### 3. 永久修改打印级别
 
 推荐在 `/etc/sysctl.d/` 下新增独立配置，避免直接追加污染 `/etc/sysctl.conf`：
 
@@ -307,82 +366,15 @@ sysctl -p /etc/sysctl.d/99-kernel-printk.conf
 sysctl -w kernel.printk="3 4 1 7"
 ```
 
-### 5. 关闭串口 Console
+### 4. 通过内核 Cmdline 设置
 
-如果生产环境不依赖串口实时看内核日志，推荐从 cmdline 移除串口 console。
-
-将：
+在内核启动参数中添加：
 
 ```text
-console=ttyAMA0,115200 console=tty0
+loglevel=4
 ```
 
-改为：
-
-```text
-console=tty0
-```
-
-或者根据现场情况保留非串口 console。修改内核启动参数后需要重启。
-
-效果：
-
-- `pl011_console_write()` 不再作为 console 输出路径被调用；
-- `printk()` 仍写入 ring buffer；
-- `dmesg`、`journalctl -k`、日志 agent 仍可读取内核日志；
-- 失去串口实时救援日志，需要依赖 kdump、pstore、BMC 其他能力或远端日志。
-
-### 6. 确认日志是否仍可查看
-
-降低 console loglevel 或关闭串口 console 不等于删除内核日志。确认方式：
-
-```bash
-dmesg -T | tail -n 100
-journalctl -k -b | tail -n 100
-```
-
-查看 journald 是否持久化：
-
-```bash
-grep -E '^\s*Storage=' /etc/systemd/journald.conf /etc/systemd/journald.conf.d/*.conf 2>/dev/null
-```
-
-崩溃场景建议同时启用或确认：
-
-```bash
-kdumpctl status
-mount | grep pstore
-ls -l /sys/fs/pstore 2>/dev/null
-```
-
-### 7. 查找日志风暴源头
-
-实时观察内核日志：
-
-```bash
-dmesg -w
-```
-
-按关键词统计近期高频日志：
-
-```bash
-dmesg -T | sed -E 's/^\[[^]]+\] //' | sort | uniq -c | sort -rn | head -30
-```
-
-查看是否存在 RAS、MCE、EDAC、AER、驱动错误风暴：
-
-```bash
-dmesg -T | grep -Ei 'ras|mce|edac|aer|error|fail|timeout|reset|stall|lockup' | tail -n 200
-```
-
-如果是驱动或模块自身重复打印，长期修复应改为限速接口：
-
-```c
-dev_warn_ratelimited(dev, "...\n");
-pr_err_ratelimited("...\n");
-```
-
-对于高频观测数据，优先使用 tracepoint、debugfs 计数器或 perf/ftrace，而不是在热路径直接 `printk()`。
+这会设置启动后的默认 console loglevel。它只影响 console 输出，不影响 `printk()` 写入 ring buffer，也不影响 `dmesg` 从 ring buffer 读取日志。
 
 ## 常见问题
 
@@ -396,9 +388,9 @@ pr_err_ratelimited("...\n");
 
 会。串口 console、`dmesg`、journald 都是 printk ring buffer 的消费者。串口打印不会把 record 从 ring buffer 取走。
 
-### Q3：为什么 softlockup 后又出现 hardlockup？
+### Q3：为什么 soft lockup 后又出现 hard lockup？
 
-softlockup 或 RCU stall 报告本身会打印大量日志。如果这些日志触发 `console_unlock()`，并且 console 是低速串口，就可能在 IRQ-off 上下文里连续同步输出，最终被 hardlockup watchdog 检测到。
+soft lockup 或 RCU stall 报告本身会打印大量日志。如果这些日志发生在中断上下文或 IRQ-off 路径，并触发 `console_unlock()` 批量 flush backlog，就可能在 IRQ-off 上下文里连续同步输出慢串口，最终被 hard lockup watchdog 检测到。
 
 ### Q4：这是不是串口硬件坏了？
 
