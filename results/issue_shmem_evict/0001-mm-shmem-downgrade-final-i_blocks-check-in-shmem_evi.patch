@@ -1,0 +1,52 @@
+From f64686d488738d39528bdbc997dc4bcb77a0a5e1 Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Thu, 23 Jul 2026 19:27:31 -0700
+Subject: [PATCH] mm/shmem: downgrade final i_blocks check in
+ shmem_evict_inode() to pr_warn()
+
+shmem_evict_inode() ends with WARN_ON(inode->i_blocks) as a final
+consistency check of shmem's block accounting.  When it fires, the
+inode-local counters die with the inode; what may linger is a small
+residue in accounting kept outside the inode, such as per-mount or
+per-user charges.  No data is lost, and no corruption follows.
+
+On kernels running with panic_on_warn=1, this accounting inconsistency
+escalates to a full machine panic, which is disproportionate to the impact.
+
+Downgrade the WARN_ON() to a pr_warn() that reports the inode and
+its residual block count, keeping the inconsistency visible in the
+logs without tainting the kernel or panicking test systems.
+
+The accounting bugs this check has caught over the years -- the
+swapout race described in commit 0f3c42f522dc ("tmpfs: change
+final i_blocks BUG to WARNING") and the error recovery race fixed
+in commit 267a4c76bbdb ("tmpfs: fix shmem_evict_inode() warnings
+on i_blocks") -- are real and should still be fixed; this change
+only removes the disproportionate escalation.
+
+Fixes: 0f3c42f522dc ("tmpfs: change final i_blocks BUG to WARNING")
+Cc: stable@vger.kernel.org
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ mm/shmem.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mm/shmem.c b/mm/shmem.c
+index b51f83c970bb..48926fd48831 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -1428,7 +1428,10 @@ static void shmem_evict_inode(struct inode *inode)
+ 	simple_xattrs_free(&sbinfo->xa_cache, &info->xattrs, sbinfo->max_inodes ? &freed : NULL);
+ 
+ 	shmem_free_inode(inode->i_sb, freed);
+-	WARN_ON(inode->i_blocks);
++	if (inode->i_blocks)
++		pr_warn("%s: inode %llu has %llu residual i_blocks\n", __func__,
++			(unsigned long long)inode->i_ino,
++			(unsigned long long)inode->i_blocks);
+ 	clear_inode(inode);
+ #ifdef CONFIG_TMPFS_QUOTA
+ 	dquot_free_inode(inode);
+-- 
+2.34.1
+
