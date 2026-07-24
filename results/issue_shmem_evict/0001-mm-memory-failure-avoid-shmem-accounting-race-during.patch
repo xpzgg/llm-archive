@@ -1,0 +1,103 @@
+From ada4a6ac7466ee62f1e8d895e8c00abc87382e50 Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Thu, 16 Jul 2026 06:20:00 -0700
+Subject: [PATCH] mm/memory-failure: avoid shmem accounting race during soft
+ offline
+
+soft_offline_in_use_page() can invalidate a non-swapcache folio with
+mapping_evict_folio().  This path can also remove a shmem folio.
+
+When soft offline races with final inode eviction,
+shmem_recalc_inode() can read mapping->nrpages before remove_mapping()
+decrements it.  The inode is then left with non-zero i_blocks after
+the folio has been removed, potentially leaving the corresponding
+shmem block charge unreleased.  It also triggers the final
+WARN_ON(inode->i_blocks), which escalates to a panic when
+panic_on_warn=1:
+
+    Kernel panic - not syncing: kernel: panic_on_warn set ...
+    CPU: 1 UID: 0 PID: 965 Comm: shmem_soft_offl Not tainted 7.2.0-rc4 #1
+    Call Trace:
+     <TASK>
+     dump_stack_lvl+0x39/0xd0
+     vpanic+0x653/0x6d0
+     panic+0xc2/0xd0
+     check_panic_on_warn+0xac/0xb0
+     __warn+0xd9/0x210
+     __report_bug+0x33e/0x410
+     report_bug+0x54/0xf0
+     handle_bug+0x258/0x290
+     exc_invalid_op+0x13/0x40
+     asm_exc_invalid_op+0x16/0x20
+    RIP: 0010:shmem_evict_inode+0x58e/0x5f0
+     evict+0x239/0x4f0
+     iput.part.0+0x34d/0x490
+     iput+0x20/0x30
+     dentry_unlink_inode+0x173/0x250
+     dentry_kill+0x197/0x600
+     finish_dput+0x19/0x150
+     dput+0x45/0x50
+     __fput+0x340/0x6b0
+     task_work_run+0x133/0x1b0
+     exit_to_user_mode_loop+0x1cd/0x670
+     do_syscall_64+0x45c/0x550
+     entry_SYSCALL_64_after_hwframe+0x76/0x7e
+     </TASK>
+
+This was reproduced by racing MADV_SOFT_OFFLINE with MAP_FIXED
+replacement of a shared anonymous shmem mapping.
+
+Commit 0f3c42f522dc ("tmpfs: change final i_blocks BUG to WARNING")
+reported a similar race between shmem swapout and inode eviction.
+Commit 267a4c76bbdb ("tmpfs: fix shmem_evict_inode() warnings on
+i_blocks") fixed that race and another one between fault and truncate.
+This is another case where an unsynchronized mapping->nrpages change
+escapes shmem's final accounting reconciliation.
+
+Skip generic invalidation for shmem in the soft-offline path and fall
+back to migration, avoiding the concurrent mapping->nrpages decrement
+from this path.
+
+Fixes: facb6011f399 ("HWPOISON: Add soft page offline support")
+Cc: stable@vger.kernel.org
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ mm/memory-failure.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index 51508a55c405..196e7b841307 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -2782,6 +2782,7 @@ static int soft_offline_in_use_page(struct page *page)
+ 	long ret = 0;
+ 	unsigned long pfn = page_to_pfn(page);
+ 	struct folio *folio = page_folio(page);
++	struct address_space *mapping;
+ 	char const *msg_page[] = {"page", "hugepage"};
+ 	bool huge = folio_test_hugetlb(folio);
+ 	bool isolated;
+@@ -2820,12 +2821,17 @@ static int soft_offline_in_use_page(struct page *page)
+ 		return 0;
+ 	}
+ 
+-	if (!huge && folio_test_lru(folio) && !folio_test_swapcache(folio))
++	if (!huge && folio_test_lru(folio) && !folio_test_swapcache(folio)) {
+ 		/*
+ 		 * Try to invalidate first. This should work for
+-		 * non dirty unmapped page cache pages.
++		 * non dirty unmapped page cache folios. Avoid shmem
++		 * here because its accounting reconciliation can race
++		 * with final inode eviction.
+ 		 */
+-		ret = mapping_evict_folio(folio_mapping(folio), folio);
++		mapping = folio_mapping(folio);
++		if (mapping && !shmem_mapping(mapping))
++			ret = mapping_evict_folio(mapping, folio);
++	}
+ 	folio_unlock(folio);
+ 
+ 	if (ret) {
+-- 
+2.34.1
+
