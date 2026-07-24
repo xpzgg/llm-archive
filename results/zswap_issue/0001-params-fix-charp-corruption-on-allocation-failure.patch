@@ -1,4 +1,4 @@
-From 40d273606bdd51ca0a0d183eac09c630281bbac4 Mon Sep 17 00:00:00 2001
+From 02753ec305cf3e462bcdf73fc98937379051cffb Mon Sep 17 00:00:00 2001
 From: Jiacheng Yu <yujiacheng3@huawei.com>
 Date: Tue, 14 Jul 2026 06:23:23 -0700
 Subject: [PATCH] params: fix charp corruption on allocation failure
@@ -17,21 +17,22 @@ Fixes: e180a6b7759a ("param: fix charp parameters set via sysfs")
 Cc: stable@vger.kernel.org
 Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
 ---
- kernel/params.c | 18 +++++++++++-------
- 1 file changed, 11 insertions(+), 7 deletions(-)
+ kernel/params.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
 
 diff --git a/kernel/params.c b/kernel/params.c
-index 9d09ea99363f..1f7dc14caa98 100644
+index 9d09ea99363f..6dcc1f905ec7 100644
 --- a/kernel/params.c
 +++ b/kernel/params.c
-@@ -264,22 +264,26 @@ EXPORT_SYMBOL_GPL(param_set_uint_minmax);
+@@ -264,22 +264,27 @@ EXPORT_SYMBOL_GPL(param_set_uint_minmax);
  
  int param_set_charp(const char *val, const struct kernel_param *kp)
  {
 -	if (strlen(val) > 1024) {
 +	char *tmp;
-+	size_t len = strlen(val);
++	size_t len;
 +
++	len = strlen(val);
 +	if (len > 1024) {
  		pr_err("%s: string parameter too long\n", kp->name);
  		return -ENOSPC;
@@ -53,8 +54,8 @@ index 9d09ea99363f..1f7dc14caa98 100644
 -		*(const char **)kp->arg = val;
 +		tmp = (char *)val;
 +
-+	maybe_kfree_parameter(*(char **)kp->arg);
 +	*(char **)kp->arg = tmp;
++	maybe_kfree_parameter(*(char **)kp->arg);
  
  	return 0;
  }
