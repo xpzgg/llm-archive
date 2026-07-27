@@ -1,7 +1,7 @@
-From f64686d488738d39528bdbc997dc4bcb77a0a5e1 Mon Sep 17 00:00:00 2001
+From be9d9b25a5939515984101e408b4990291c00976 Mon Sep 17 00:00:00 2001
 From: Jiacheng Yu <yujiacheng3@huawei.com>
 Date: Thu, 23 Jul 2026 19:27:31 -0700
-Subject: [PATCH] mm/shmem: downgrade final i_blocks check in
+Subject: [PATCH v2] mm/shmem: downgrade final i_blocks check in
  shmem_evict_inode() to pr_warn()
 
 shmem_evict_inode() ends with WARN_ON(inode->i_blocks) as a final
@@ -13,9 +13,10 @@ per-user charges.  No data is lost, and no corruption follows.
 On kernels running with panic_on_warn=1, this accounting inconsistency
 escalates to a full machine panic, which is disproportionate to the impact.
 
-Downgrade the WARN_ON() to a pr_warn() that reports the inode and
-its residual block count, keeping the inconsistency visible in the
-logs without tainting the kernel or panicking test systems.
+Downgrade the WARN_ON() to a pr_warn() that reports the inode together
+with its accounting counters (i_blocks, alloced, swapped, nrpages),
+keeping the inconsistency visible in the logs -- and diagnosable --
+without tainting the kernel or panicking test systems.
 
 The accounting bugs this check has caught over the years -- the
 swapout race described in commit 0f3c42f522dc ("tmpfs: change
@@ -28,22 +29,23 @@ Fixes: 0f3c42f522dc ("tmpfs: change final i_blocks BUG to WARNING")
 Cc: stable@vger.kernel.org
 Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
 ---
- mm/shmem.c | 5 ++++-
- 1 file changed, 4 insertions(+), 1 deletion(-)
+ mm/shmem.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/mm/shmem.c b/mm/shmem.c
-index b51f83c970bb..48926fd48831 100644
+index b51f83c970bb..223484cdc8f2 100644
 --- a/mm/shmem.c
 +++ b/mm/shmem.c
-@@ -1428,7 +1428,10 @@ static void shmem_evict_inode(struct inode *inode)
+@@ -1428,7 +1428,11 @@ static void shmem_evict_inode(struct inode *inode)
  	simple_xattrs_free(&sbinfo->xa_cache, &info->xattrs, sbinfo->max_inodes ? &freed : NULL);
  
  	shmem_free_inode(inode->i_sb, freed);
 -	WARN_ON(inode->i_blocks);
 +	if (inode->i_blocks)
-+		pr_warn("%s: inode %llu has %llu residual i_blocks\n", __func__,
-+			(unsigned long long)inode->i_ino,
-+			(unsigned long long)inode->i_blocks);
++		pr_warn("%s: ino=%llu i_blocks=%llu alloced=%lu swapped=%lu nrpages=%lu\n",
++			__func__, (unsigned long long)inode->i_ino,
++			(unsigned long long)inode->i_blocks,
++			info->alloced, info->swapped, inode->i_mapping->nrpages);
  	clear_inode(inode);
  #ifdef CONFIG_TMPFS_QUOTA
  	dquot_free_inode(inode);
