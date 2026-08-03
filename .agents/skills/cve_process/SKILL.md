@@ -87,14 +87,29 @@ stack.watch、cybersecurity-help.cz、opencve.io 等站点的搜索结果摘要�
 
 ### 四、Kconfig 依赖
 
-通过 patch 中的文件路径，在内核源码中追溯 Kconfig/Makefile，确认依赖的编译选项。将模板中的占位符替换为实际值，**不得修改模板原文措辞**，仅替换 `CONFIG_XX`/`CONFIG_xxx`/`xxx.ko` 部分。如果 config 是 bool 类型（只有 y/n），不需要 `|| =m` 分支和 KO 依赖行。
+**为什么要做这件事**：下游需要靠 CONFIG 依赖和 KO 依赖来排查某个内核是否涉及该缺陷——先看 `.config` 里相关选项是否打开（决定缺陷代码是否被编译），再看对应的 ko 是否被加载（决定缺陷代码是否真正存在于运行中的内核）。因此本节的输出就是给下游排查直接使用的结论，措辞固定、不得改写，仅替换模板中的 `CONFIG_XX`/`CONFIG_YY`/`xxx.ko`。
 
-若存在依赖链（如 `CONFIG_A` depends on `CONFIG_B`，`CONFIG_B` depends on `CONFIG_C`），只需写链上最末端的 config——它能 transitive 地覆盖所有上游依赖，无需逐层列出。
+按实际情形选用模板：
 
 ```
 CONFIG依赖：CONFIG_XX=y || CONFIG_XX=m 则涉及。
-KO依赖：如果CONFIG_xxx以=m的形式打开的情况下，则可排查xxx.ko是否被加载，没有被加载则不涉及。
+KO依赖：如果CONFIG_XX以=m的形式打开的情况下，则可排查xxx.ko是否被加载，没有被加载则不涉及。
 ```
+
+```
+CONFIG依赖：CONFIG_YY=y 则涉及。
+```
+
+```
+CONFIG依赖：(CONFIG_XX=y || CONFIG_XX=m) && CONFIG_YY=y 则涉及。
+KO依赖：如果CONFIG_XX以=m的形式打开的情况下，则可排查xxx.ko是否被加载，没有被加载则不涉及。
+```
+
+**需要避免的 corner case**：
+
+- 依赖链有多层（`CONFIG_A` depends on `CONFIG_B`）时，只写最末端 config，它能 transitive 覆盖上游，不要逐层罗列。
+- 控制 config 是 bool 时，不要照搬 `|| =m` 分支和 KO 依赖行——bool 不产生独立 ko。
+- bool 的控制 config 若挂在 tristate 上游下（如 bool `DRM_MSM_DSI` depends on tristate `DRM_MSM`），缺陷代码实际编入上游 tristate 的 ko，此时要用第三个合取式模板，KO 排查对象是上游的 ko。
 
 ---
 
