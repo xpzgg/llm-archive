@@ -118,3 +118,17 @@ KO依赖：如果CONFIG_XX以=m的形式打开的情况下，则可排查xxx.ko�
 - 严格基于 patch 实际内容分析，不得臆测无法从 diff 中得出的结论
 - 技术术语保留英文原文，说明用中文
 - 若 patch 涉及多个 commit（fix + fix-of-fix），逐一说明各 commit 的角色
+
+---
+
+## 回填 HULK
+
+完成分析后不得自动回填。只有用户明确确认当前分析可以提交时，才把用户确认的完整
+分析正文保存为仓库根目录下的 UTF-8 文件 `cve-analysis.md`，并执行：
+
+```bash
+python3 scripts/hulk_cve_comment.py <CVE-ID> cve-analysis.md
+```
+
+脚本固定先用 GET 获取内部 vulnerability ID，再用 POST 创建 comment。只有脚本输出
+的 JSON 中 `ok` 为 `true` 才报告成功。POST 结果不明确时不得自动重试，以免重复提交。
