@@ -56,3 +56,26 @@
 - **futex (Fast Userspace Mutex)** — 用户态锁的内核支持机制。无竞争时纯用户态原子操作（不进内核），只有竞争时才通过系统调用进内核排队睡眠 / 唤醒。
 - **`futex_requeue`** — 一个系统调用，把等在 futex A 上的任务直接搬到 futex B 的等待队列上，不唤醒。省掉 N 次无意义的唤醒-重阻塞（内核态↔用户态切换）。
 - **proxy lock（代理加锁）** — `futex_requeue` 搬运任务时，需要让睡眠中的任务在新 rtmutex 上排队（保证 PI 链正确）。但任务在睡眠，不能自己操作，所以由调用 requeue 的任务（`current`）代替它完成入队。此时 `waiter->task`（被搬运的任务）≠ `current`（执行搬运的任务）。
+
+## SLUB（v6.6 经典架构）
+
+- **分层结构** — `kmem_cache`（一类对象的配置，本身不存对象）→ `kmem_cache_cpu`（per-CPU 分配状态，无锁快路径）→ `kmem_cache_node.partial`（per-node 共享层，`list_lock`）→ buddy。一张 slab 任意时刻只处于三种位置之一：某 CPU 的活跃 slab（frozen）、挂在某条 partial 链表上、全满不在任何链表上。
+- **两条 freelist** — `cpu_slab->freelist` 是本 CPU 私有链；`slab->freelist` 收其他 CPU 释放回来的对象。frozen=1 表示该 slab 是某 CPU 的活跃 slab；deactivate 时两链合并。
+- **快路径并发设计** — 不禁抢占；`this_cpu_cmpxchg` 同时校验 freelist+tid（tid 防 ABA、检测抢占/中断/迁移干扰），失败重试。不变量：只有本 CPU 上执行的代码会碰本 CPU 的 `cpu_slab->freelist`。PREEMPT_RT 下退化为 local_lock。
+- **`struct slab`** — 复用首页 page 描述符，零额外内存；freelist 与 inuse/objects/frozen 打包成单字，供其他 CPU 释放时双字 cmpxchg；满的 slab 不在任何链表上。
+- **布局围绕原子操作单元** — freelist+tid、freelist+counters、oo(order+objects) 三处字段打包。
+- **释放路径分流** — 判据只有一个：所属 slab 是否本 CPU 活跃 slab。是 → push `c->freelist`（与分配 pop 对称）；否 → `__slab_free` 挂 `slab->freelist`，按 was_frozen / 释放前全满 / 释放后全空三分支处理。cpu partial 唯一入口在释放路径（`put_cpu_partial`），出口在分配路径。
+
+详见 [mm/slub/slub.md](mm/slub/slub.md)（含分配/释放全流程与配套图）。
+
+## shmem（v6.6）
+
+- **定位** — 无后备设备的文件系统，给"可共享的匿名内存"一个 inode 身份。tmpfs、/dev/shm、SysV shm、memfd、`MAP_SHARED|ANONYMOUS` 全是它。
+- **设计本质：page cache 反转** — XArray 里是真身不是缓存，无磁盘可写回；回收时换出到 swap，swap 扮演普通文件块设备的角色。
+- **三态槽位** — `address_space->i_pages` 的槽位：folio 指针（在内存）/ swap entry（已换出，`xa_mk_value` 编码）/ 空（空洞）。所有取页路径收敛到 `shmem_get_folio_gfp`，按 `sgp_type` 意图决定空洞是否分配。
+- **两张世界** — 进程侧（VMA/PTE）与文件侧（inode/XArray）靠 `vm_fault` 工单交接：shmem 填 `vmf->page`，通用层 `finish_fault` 填 PTE。PTE 与 XArray 槽位是指向同一物理页的两条独立引用。
+- **`__folio_set_swapbacked`** — shmem 页挂 anon LRU、回收走 swap 的判据，page cache 反转落到代码就是这一个标志。
+- **三态转换** — 空洞→指针（fault 分配）、指针→swap entry（`shmem_writepage` 换出）、swap entry→指针（`shmem_swapin_folio` 换入，先查 swap cache，读盘记 major fault）。
+- **限额与故障语义** — `max_blocks`/`used_blocks` 是 tmpfs `size=` / docker `--shm-size` 落点；超限 `-ENOSPC` → SIGBUS（容器里 DataLoader 的 `Bus error`）；无 swap 时 shmem 页钉死不可回收。
+
+详见 [mm/shmem/shmem.md](mm/shmem/shmem.md)。

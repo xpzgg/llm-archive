@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1040" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <defs>
+    <marker id="mD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5d6d7e"/>
+    </marker>
+  </defs>
+
+  <text x="640" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#1b2631">SLUB 释放路径（Linux v6.6）</text>
+  <text x="640" y="58" text-anchor="middle" font-size="11.5" fill="#7f8c8d">kmem_cache_free → do_slab_free → __slab_free · mm/slub.c · [ ] 内为 /proc/slabinfo 统计项</text>
+
+  <!-- 入口 -->
+  <rect x="240" y="72" width="200" height="36" rx="18" fill="#eaf2f8" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="95" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1b2631">kmem_cache_free(s, x)</text>
+  <path d="M 340,108 L 340,124" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="200" y="124" width="280" height="46" rx="6" fill="#ffffff" stroke="#566573" stroke-width="1.3"/>
+  <text x="340" y="140" text-anchor="middle" font-size="10" fill="#1b2631">virt_to_slab(x)：对象地址 → 页</text>
+  <text x="340" y="157" text-anchor="middle" font-size="10" fill="#1b2631">→ struct slab（反查归属）</text>
+  <path d="M 340,170 L 340,194" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <!-- ===== 快路径 ===== -->
+  <rect x="90" y="178" width="860" height="150" rx="8" fill="#f2f9f4" stroke="#1e8449" stroke-width="1.2"/>
+  <text x="936" y="200" text-anchor="end" font-size="12" font-weight="bold" fill="#1e8449">快路径 do_slab_free（无锁，cmpxchg + tid）</text>
+  <polygon points="180,253 340,225 500,253 340,281" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="257" text-anchor="middle" font-size="10.5" fill="#1b2631">所属 slab == c-&gt;slab ？</text>
+  <text x="508" y="243" font-size="10" fill="#1e8449">是</text>
+  <path d="M 500,253 L 556,253" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="211" width="370" height="72" rx="6" fill="#eafaf1" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="574" y="229" font-size="10.5" fill="#1b2631">set_freepointer 接链 → this_cpu_cmpxchg</text>
+  <text x="574" y="246" font-size="10.5" fill="#1b2631">push 到 c-&gt;freelist 头部</text>
+  <text x="574" y="265" font-size="9.5" fill="#566573">统计：FREE_FASTPATH —— 绝大多数释放在此结束</text>
+  <text x="348" y="297" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,281 L 340,314" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <!-- ===== 慢路径 __slab_free ===== -->
+  <rect x="90" y="298" width="860" height="690" rx="8" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.2"/>
+  <text x="936" y="320" text-anchor="end" font-size="12" font-weight="bold" fill="#2471a3">慢路径 __slab_free（对象不属于本 CPU 活跃 slab）</text>
+
+  <rect x="195" y="314" width="290" height="64" rx="6" fill="#ffffff" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="340" y="340" text-anchor="middle" font-size="10" fill="#1b2631">对象（串）挂到 slab-&gt;freelist 头部，inuse -= cnt</text>
+  <text x="340" y="360" text-anchor="middle" font-size="9.5" fill="#566573">（slab 级双字 cmpxchg，失败重试）</text>
+  <path d="M 340,378 L 340,404" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="180,440 340,410 500,440 340,470" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="434" text-anchor="middle" font-size="10.5" fill="#1b2631">was_frozen？</text>
+  <text x="340" y="450" text-anchor="middle" font-size="9.5" fill="#566573">（是别的 CPU 的活跃 slab）</text>
+  <text x="508" y="428" font-size="10" fill="#1b2631">是</text>
+  <path d="M 500,440 L 556,440" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="404" width="370" height="64" rx="6" fill="#eaf2fb" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="574" y="421" font-size="10.5" fill="#1b2631">挂完即结束：活跃 slab 的远程释放</text>
+  <text x="574" y="437" font-size="10" fill="#1b2631">等该 CPU 下次 get_freelist 收编</text>
+  <text x="574" y="454" font-size="9.5" fill="#566573">统计：FREE_FROZEN</text>
+  <text x="348" y="484" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,470 L 340,494" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="170,530 340,498 510,530 340,562" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="524" text-anchor="middle" font-size="10.5" fill="#1b2631">prior == NULL？</text>
+  <text x="340" y="540" text-anchor="middle" font-size="9.5" fill="#566573">（释放前 slab 全满、不在任何链表）</text>
+  <text x="348" y="576" font-size="10" fill="#1b2631">是</text>
+  <path d="M 340,562 L 340,588" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <text x="518" y="518" font-size="10" fill="#1b2631">否</text>
+  <path d="M 510,530 L 546,530" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="562" cy="530" r="14" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="562" y="534" text-anchor="middle" font-size="9" font-weight="bold" fill="#2471a3">E</text>
+
+  <polygon points="180,624 340,594 500,624 340,654" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="628" text-anchor="middle" font-size="10.5" fill="#1b2631">配置了 cpu partial？</text>
+  <text x="508" y="610" font-size="10" fill="#1b2631">是</text>
+  <path d="M 500,624 L 556,620" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="588" width="370" height="64" rx="6" fill="#eaf2fb" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="574" y="604" font-size="10.5" fill="#1b2631">标记 frozen=1 → put_cpu_partial</text>
+  <text x="574" y="620" font-size="10" fill="#1b2631">挂到本 CPU 的 cpu partial</text>
+  <text x="574" y="637" font-size="9.5" fill="#566573">统计：CPU_PARTIAL_FREE（超上限批量退回 node partial）</text>
+  <text x="348" y="668" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,654 L 340,676" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="210" y="676" width="260" height="48" rx="6" fill="#eaf2fb" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="340" y="692" text-anchor="middle" font-size="10" fill="#1b2631">持 list_lock → add_partial 挂 node partial</text>
+  <text x="340" y="709" text-anchor="middle" font-size="9.5" fill="#566573">统计：FREE_ADD_PARTIAL</text>
+
+  <polygon points="180,766 340,736 500,766 340,796" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="760" text-anchor="middle" font-size="10.5" fill="#1b2631">new.inuse == 0？</text>
+  <text x="340" y="776" text-anchor="middle" font-size="9.5" fill="#566573">（这次释放让 slab 全空）</text>
+  <!-- E 到达点：只有出圈箭头 -->
+  <circle cx="140" cy="766" r="14" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="140" y="770" text-anchor="middle" font-size="9" font-weight="bold" fill="#2471a3">E</text>
+  <path d="M 154,766 L 176,766" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <text x="508" y="754" font-size="10" fill="#1b2631">否</text>
+  <path d="M 500,766 L 556,766" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="730" width="370" height="64" rx="6" fill="#eaf2fb" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="574" y="747" font-size="10.5" fill="#1b2631">slab 已在 node partial 上，无链表操作</text>
+  <text x="574" y="763" font-size="10" fill="#1b2631">对象挂上即完成（常见的远程释放）</text>
+  <text x="348" y="810" font-size="10" fill="#1b2631">是</text>
+  <path d="M 340,796 L 340,822" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="180,852 340,822 500,852 340,882" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="856" text-anchor="middle" font-size="10.5" fill="#1b2631">nr_partial ≥ min_partial？</text>
+  <text x="510" y="838" font-size="10" fill="#1b2631">是</text>
+  <path d="M 500,852 L 556,849" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="816" width="370" height="64" rx="6" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="574" y="833" font-size="10.5" fill="#1b2631">remove_partial 从 partial 摘下</text>
+  <text x="574" y="849" font-size="10" fill="#1b2631">discard_slab 还给 buddy</text>
+  <text x="574" y="866" font-size="9.5" fill="#566573">统计：FREE_REMOVE_PARTIAL + FREE_SLAB</text>
+  <text x="348" y="896" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,882 L 340,908" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="210" y="908" width="260" height="48" rx="6" fill="#f2f3f4" stroke="#7f8c8d" stroke-width="1.3"/>
+  <text x="340" y="924" text-anchor="middle" font-size="10" fill="#1b2631">留在 node partial</text>
+  <text x="340" y="941" text-anchor="middle" font-size="9.5" fill="#566573">（保住 min_partial 存量）</text>
+
+  <!-- ===== 右侧面板 ===== -->
+  <rect x="980" y="178" width="270" height="480" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.2"/>
+  <text x="996" y="204" font-size="12.5" font-weight="bold" fill="#1b2631">附 1：与分配路径的对称</text>
+  <text x="996" y="228" font-size="10" fill="#2e4053">• 快路径：alloc pop ↔ free push</text>
+  <text x="996" y="245" font-size="9.5" fill="#7f8c8d">　c-&gt;freelist（同一 cmpxchg 原语）</text>
+  <text x="996" y="266" font-size="10" fill="#2e4053">• get_freelist 收编 slab-&gt;freelist</text>
+  <text x="996" y="283" font-size="9.5" fill="#7f8c8d">　↔ 远程释放 push slab-&gt;freelist</text>
+  <text x="996" y="304" font-size="10" fill="#2e4053">• cpu partial：入口 = CPU_PARTIAL_FREE</text>
+  <text x="996" y="321" font-size="9.5" fill="#7f8c8d">　（本图）↔ 出口 = CPU_PARTIAL_ALLOC（分配图）</text>
+  <path d="M 996,340 L 1234,340" stroke="#d5dbdb" stroke-width="1"/>
+  <text x="996" y="364" font-size="12.5" font-weight="bold" fill="#1b2631">附 2：边角情况</text>
+  <text x="996" y="386" font-size="10" fill="#2e4053">• 一串释放把满 slab 直接放空：</text>
+  <text x="996" y="403" font-size="9.5" fill="#7f8c8d">　配置 cpu partial 时同样挂到释放者</text>
+  <text x="996" y="420" font-size="9.5" fill="#7f8c8d">　cpu partial；未配置且 nr_partial ≥</text>
+  <text x="996" y="437" font-size="9.5" fill="#7f8c8d">　min_partial 时直接还 buddy</text>
+  <path d="M 996,456 L 1234,456" stroke="#d5dbdb" stroke-width="1"/>
+  <text x="996" y="480" font-size="12.5" font-weight="bold" fill="#1b2631">图例</text>
+  <rect x="996" y="496" width="14" height="14" fill="#f2f9f4" stroke="#1e8449"/>
+  <text x="1018" y="507" font-size="9.5" fill="#2e4053">快路径 do_slab_free</text>
+  <rect x="996" y="518" width="14" height="14" fill="#eaf2fb" stroke="#2471a3"/>
+  <text x="1018" y="529" font-size="9.5" fill="#2e4053">慢路径处理结果</text>
+  <rect x="996" y="540" width="14" height="14" fill="#fdf6ec" stroke="#b9770e"/>
+  <text x="1018" y="551" font-size="9.5" fill="#2e4053">还给 buddy</text>
+  <rect x="996" y="562" width="14" height="14" fill="#f2f3f4" stroke="#7f8c8d"/>
+  <text x="1018" y="573" font-size="9.5" fill="#2e4053">保留在 partial</text>
+  <text x="996" y="602" font-size="9.5" fill="#7f8c8d">圆圈 E = 转接符号：</text>
+  <text x="996" y="619" font-size="9.5" fill="#7f8c8d">进圈 = 跳离此处；出圈 = 跳转到此</text>
+  <text x="996" y="637" font-size="9.5" fill="#7f8c8d">[ ] 内为 /proc/slabinfo 统计项</text>
+</svg>

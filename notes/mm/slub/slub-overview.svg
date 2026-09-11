@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 830" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <defs>
+    <marker id="mG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e8449"/>
+    </marker>
+    <marker id="mO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d35400"/>
+    </marker>
+    <marker id="mB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2471a3"/>
+    </marker>
+    <marker id="mGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7f8c8d"/>
+    </marker>
+  </defs>
+
+  <!-- ===================== 标题 ===================== -->
+  <text x="610" y="34" text-anchor="middle" font-size="20" font-weight="bold" fill="#1b2631">SLUB 全景：一张 slab 与三层分配路径</text>
+  <text x="610" y="56" text-anchor="middle" font-size="12" fill="#7f8c8d">kmalloc-128 为例 · struct slab 复用页描述符 · Linux v6.6 mm/slub.c</text>
+
+  <!-- ===================== 左列：三层结构 ===================== -->
+  <!-- kmem_cache -->
+  <rect x="40" y="70" width="380" height="110" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.5"/>
+  <text x="56" y="94" font-size="14" font-weight="bold" fill="#1b2631">kmem_cache（kmalloc-128）</text>
+  <text x="56" y="114" font-size="12" fill="#2e4053">object_size = 128 B；oo = { order 0, objects 32 }</text>
+  <text x="56" y="132" font-size="12" fill="#2e4053">一张 slab = 2^order 页 = 1 页 × 32 槽</text>
+  <text x="56" y="150" font-size="12" fill="#2e4053">cpu_slab[]：每 CPU 一个（见下）</text>
+  <text x="56" y="168" font-size="12" fill="#2e4053">node[]：每 NUMA 节点一个 → partial</text>
+
+  <path d="M 230,184 L 230,222" stroke="#7f8c8d" stroke-width="1.5" fill="none" marker-end="url(#mGray)"/>
+
+  <!-- cpu_slab -->
+  <rect x="40" y="230" width="380" height="150" rx="8" fill="#fbfcfc" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="56" y="254" font-size="14" font-weight="bold" fill="#1b2631">cpu_slab（per-CPU，例：CPU3）</text>
+  <text x="56" y="276" font-size="12" font-weight="bold" fill="#1e8449">freelist ─▶ obj1（本 CPU 私有链头）</text>
+  <text x="56" y="294" font-size="12" fill="#2e4053">slab ─▶ 当前活跃 slab（右侧那页）</text>
+  <text x="56" y="312" font-size="12" fill="#2e4053">tid：版本计数，与 freelist 一起 cmpxchg</text>
+  <text x="56" y="330" font-size="12" fill="#aab7b8">lock：仅 PREEMPT_RT 使用</text>
+  <text x="56" y="352" font-size="11.5" fill="#7f8c8d">快路径：this_cpu_cmpxchg pop；仅本 CPU 可碰</text>
+  <text x="56" y="368" font-size="11.5" fill="#7f8c8d">（其他 CPU 释放 → 只能挂 slab-&gt;freelist）</text>
+
+  <path d="M 230,384 L 230,424" stroke="#2471a3" stroke-width="2" fill="none" marker-end="url(#mB)"/>
+  <text x="242" y="402" font-size="11" fill="#2471a3">② 本 CPU 链空 → 从 partial</text>
+  <text x="242" y="417" font-size="11" fill="#2471a3">取一张激活（冻结）</text>
+
+  <!-- kmem_cache_node -->
+  <rect x="40" y="430" width="380" height="130" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.5"/>
+  <text x="56" y="454" font-size="14" font-weight="bold" fill="#1b2631">kmem_cache_node（per-NUMA-node）</text>
+  <text x="56" y="476" font-size="12" fill="#2e4053">partial：用了一半的 slab 链表</text>
+  <rect x="60" y="490" width="64" height="26" rx="4" fill="#eaf2f8" stroke="#7f8c8d"/>
+  <text x="92" y="507" text-anchor="middle" font-size="11" fill="#2e4053">slab</text>
+  <path d="M 126,503 L 144,503" stroke="#7f8c8d" stroke-width="1.2" marker-end="url(#mGray)"/>
+  <rect x="146" y="490" width="64" height="26" rx="4" fill="#eaf2f8" stroke="#7f8c8d"/>
+  <text x="178" y="507" text-anchor="middle" font-size="11" fill="#2e4053">slab</text>
+  <path d="M 212,503 L 230,503" stroke="#7f8c8d" stroke-width="1.2" marker-end="url(#mGray)"/>
+  <rect x="232" y="490" width="64" height="26" rx="4" fill="#eaf2f8" stroke="#7f8c8d"/>
+  <text x="264" y="507" text-anchor="middle" font-size="11" fill="#2e4053">slab</text>
+  <text x="304" y="507" font-size="10" fill="#7f8c8d">→ NULL</text>
+  <text x="56" y="542" font-size="11.5" fill="#7f8c8d">list_lock：批量补货 / 卸货时拿</text>
+
+  <path d="M 230,564 L 230,604" stroke="#2471a3" stroke-width="2" fill="none" marker-end="url(#mB)"/>
+  <text x="242" y="582" font-size="11" fill="#2471a3">③ partial 也空 → buddy</text>
+  <text x="242" y="597" font-size="11" fill="#2471a3">批发新页做新 slab</text>
+
+  <!-- buddy -->
+  <rect x="40" y="610" width="380" height="90" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.5"/>
+  <text x="56" y="634" font-size="14" font-weight="bold" fill="#1b2631">buddy（free_area[]）</text>
+  <rect x="60" y="650" width="32" height="32" fill="#f4f6f6" stroke="#666"/>
+  <rect x="98" y="650" width="32" height="32" fill="#f4f6f6" stroke="#666"/>
+  <text x="140" y="672" font-size="13" fill="#7f8c8d">…</text>
+  <text x="186" y="662" font-size="11" fill="#2e4053">2^order 连续页框</text>
+  <text x="186" y="680" font-size="11" fill="#7f8c8d">SLUB 的批发商（order 0/1/3…）</text>
+
+  <!-- ===================== 右侧：一张 slab 的物理视图 ===================== -->
+  <text x="560" y="88" font-size="13" font-weight="bold" fill="#1b2631">物理视图：一张 slab = 1 个 order-0 页（4KB），切成 32 × 128 B 槽位</text>
+
+  <!-- 页框 -->
+  <rect x="560" y="120" width="600" height="320" fill="none" stroke="#1b2631" stroke-width="2"/>
+
+  <!-- row 0 -->
+  <rect x="560" y="120" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="565" y="136" font-size="9.5" fill="#666">obj0</text>
+  <rect x="635" y="120" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="640" y="136" font-size="9.5" fill="#1e8449">obj1</text>
+  <text x="640" y="190" font-size="9" font-weight="bold" fill="#1e8449">◀ cpu 链头</text>
+  <rect x="710" y="120" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="715" y="136" font-size="9.5" fill="#666">obj2</text>
+  <rect x="785" y="120" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="790" y="136" font-size="9.5" fill="#666">obj3</text>
+  <rect x="860" y="120" width="75" height="80" fill="#fdebd0" stroke="#d35400" stroke-width="1.5"/>
+  <text x="865" y="136" font-size="9.5" fill="#d35400">obj4</text>
+  <text x="865" y="190" font-size="9" font-weight="bold" fill="#d35400">◀ slab 链头</text>
+  <rect x="935" y="120" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="940" y="136" font-size="9.5" fill="#666">obj5</text>
+  <rect x="1010" y="120" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="1015" y="136" font-size="9.5" fill="#1e8449">obj6</text>
+  <rect x="1085" y="120" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1090" y="136" font-size="9.5" fill="#666">obj7</text>
+
+  <!-- row 1 -->
+  <rect x="560" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="565" y="216" font-size="9.5" fill="#666">obj8</text>
+  <rect x="635" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="640" y="216" font-size="9.5" fill="#666">obj9</text>
+  <rect x="710" y="200" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="715" y="216" font-size="9.5" fill="#1e8449">obj10</text>
+  <rect x="785" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="790" y="216" font-size="9.5" fill="#666">obj11</text>
+  <rect x="860" y="200" width="75" height="80" fill="#fdebd0" stroke="#d35400" stroke-width="1.5"/>
+  <text x="865" y="216" font-size="9.5" fill="#d35400">obj12</text>
+  <rect x="935" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="940" y="216" font-size="9.5" fill="#666">obj13</text>
+  <rect x="1010" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1015" y="216" font-size="9.5" fill="#666">obj14</text>
+  <rect x="1085" y="200" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1090" y="216" font-size="9.5" fill="#666">obj15</text>
+
+  <!-- row 2 -->
+  <rect x="560" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="565" y="296" font-size="9.5" fill="#666">obj16</text>
+  <rect x="635" y="280" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="640" y="296" font-size="9.5" fill="#1e8449">obj17</text>
+  <rect x="710" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="715" y="296" font-size="9.5" fill="#666">obj18</text>
+  <rect x="785" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="790" y="296" font-size="9.5" fill="#666">obj19</text>
+  <rect x="860" y="280" width="75" height="80" fill="#fdebd0" stroke="#d35400" stroke-width="1.5"/>
+  <text x="865" y="296" font-size="9.5" fill="#d35400">obj20</text>
+  <rect x="935" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="940" y="296" font-size="9.5" fill="#666">obj21</text>
+  <rect x="1010" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1015" y="296" font-size="9.5" fill="#666">obj22</text>
+  <rect x="1085" y="280" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1090" y="296" font-size="9.5" fill="#666">obj23</text>
+
+  <!-- row 3 -->
+  <rect x="560" y="360" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="565" y="376" font-size="9.5" fill="#1e8449">obj24</text>
+  <rect x="635" y="360" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="640" y="376" font-size="9.5" fill="#666">obj25</text>
+  <rect x="710" y="360" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="715" y="376" font-size="9.5" fill="#666">obj26</text>
+  <rect x="785" y="360" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="790" y="376" font-size="9.5" fill="#666">obj27</text>
+  <rect x="860" y="360" width="75" height="80" fill="#fdebd0" stroke="#d35400" stroke-width="1.5"/>
+  <text x="865" y="376" font-size="9.5" fill="#d35400">obj28</text>
+  <rect x="935" y="360" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="940" y="376" font-size="9.5" fill="#666">obj29</text>
+  <rect x="1010" y="360" width="75" height="80" fill="#d5f5e3" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="1015" y="376" font-size="9.5" fill="#1e8449">obj30</text>
+  <rect x="1085" y="360" width="75" height="80" fill="#dcdde1" stroke="#999"/>
+  <text x="1090" y="376" font-size="9.5" fill="#666">obj31</text>
+
+  <!-- 绿链 cpu_slab->freelist: obj1 → obj6 → obj10 → obj17 → obj24 → obj30 -->
+  <path d="M 678,150 C 800,120 940,120 1042,150" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#mG)"/>
+  <path d="M 1042,170 C 980,258 850,262 752,246" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#mG)"/>
+  <path d="M 742,248 C 706,272 686,290 678,312" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#mG)"/>
+  <path d="M 666,328 C 630,352 610,372 602,392" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#mG)"/>
+  <path d="M 606,408 C 720,452 940,452 1042,408" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#mG)"/>
+
+  <!-- 橙链 slab->freelist: obj4 → obj12 → obj20 → obj28 -->
+  <path d="M 906,168 C 916,196 916,204 906,232" stroke="#d35400" stroke-width="2.2" fill="none" marker-end="url(#mO)"/>
+  <path d="M 906,248 C 916,276 916,284 906,312" stroke="#d35400" stroke-width="2.2" fill="none" marker-end="url(#mO)"/>
+  <path d="M 906,328 C 916,356 916,364 906,392" stroke="#d35400" stroke-width="2.2" fill="none" marker-end="url(#mO)"/>
+
+  <!-- ① 快路径 pop -->
+  <path d="M 424,268 C 490,250 520,200 556,166" stroke="#1e8449" stroke-width="2.5" fill="none" marker-end="url(#mG)"/>
+  <text x="432" y="232" font-size="11.5" font-weight="bold" fill="#1e8449">① pop obj1</text>
+
+  <!-- cpu_slab->slab 指针 -->
+  <path d="M 424,305 L 552,305" stroke="#7f8c8d" stroke-width="1.5" stroke-dasharray="5,4" fill="none" marker-end="url(#mGray)"/>
+  <text x="448" y="296" font-size="9.5" fill="#7f8c8d">当前 slab</text>
+
+  <!-- 页描述符 → struct slab -->
+  <path d="M 610,442 L 610,486" stroke="#7f8c8d" stroke-width="1.2" stroke-dasharray="4,4" fill="none" marker-end="url(#mGray)"/>
+  <text x="618" y="468" font-size="9" fill="#7f8c8d">首页的 page 描述符</text>
+
+  <!-- struct slab -->
+  <rect x="560" y="490" width="600" height="150" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.5"/>
+  <text x="576" y="514" font-size="14" font-weight="bold" fill="#1b2631">struct slab（复用该页的 page 描述符，零额外内存）</text>
+  <text x="576" y="534" font-size="12" fill="#2e4053">slab_cache ─▶ kmem_cache（释放时反查对象归属）</text>
+  <text x="576" y="552" font-size="12" font-weight="bold" fill="#d35400">freelist ─▶ obj4（橙链链头）</text>
+  <text x="576" y="570" font-size="12" fill="#2e4053">inuse=22 │ objects=32 │ frozen=1（打包进一个字长）</text>
+  <text x="576" y="588" font-size="12" fill="#2e4053">slab_list ↔ 卸任后挂到 node-&gt;partial</text>
+  <text x="576" y="610" font-size="11.5" fill="#7f8c8d">freelist+counters 双字 cmpxchg：防其他 CPU 并发释放</text>
+  <text x="576" y="628" font-size="11.5" fill="#7f8c8d">页内 100% 是对象；本结构在 memmap 里，不占页内空间</text>
+
+  <!-- 图例 -->
+  <rect x="560" y="665" width="600" height="140" rx="8" fill="#fdfefe" stroke="#aab7b8" stroke-width="1.2" stroke-dasharray="6,4"/>
+  <text x="576" y="689" font-size="13.5" font-weight="bold" fill="#1b2631">两条 freelist（理解 SLUB 的关键）</text>
+  <text x="576" y="709" font-size="12" fill="#1e8449">绿链 cpu_slab-&gt;freelist：本 CPU 分配 / 释放（无锁快路径）</text>
+  <text x="576" y="727" font-size="12" fill="#d35400">橙链 slab-&gt;freelist：其他 CPU 释放回来的对象（cmpxchg 保护）</text>
+  <text x="576" y="745" font-size="12" fill="#2e4053">frozen=1：本 CPU 独占此 slab；卸任（deactivate）时两链合并</text>
+  <text x="576" y="763" font-size="11.5" fill="#7f8c8d">侵入式指针：空闲对象前 8 B 存"下一个空闲对象"的地址（绿/橙箭头）</text>
+  <text x="576" y="781" font-size="11.5" fill="#7f8c8d">灰格 = 已分配（22 个）；绿 + 橙格 = 空闲（10 个）；inuse = 22</text>
+</svg>
