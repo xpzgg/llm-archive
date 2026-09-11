@@ -12,7 +12,8 @@ description: >
 本机环境：
 - mihomo 工作目录 `/home/yjc/.config/mihomo/`，配置文件 `config.yaml`
 - 代理端口 `7890`（HTTP/SOCKS5），TUN 默认关闭 → curl 须 `-x http://127.0.0.1:7890`
-- external-controller `127.0.0.1:9090`（无 token，本机直连）
+- external-controller `127.0.0.1:8765`，**需要 secret**（见 `config.yaml` 的 `secret:` 字段），curl 须加 `-H "Authorization: Bearer <secret>"`
+- external-ui 为 `ui`；面板通过 frp（frpc 在 `/home/huawei/frp/frpc.toml`）经阿里云公网暴露，**必须保留 secret**
 - `profile.store-selected: true` → 切换的节点会持久化，重启不丢
 
 ---
@@ -43,8 +44,11 @@ journalctl -u mihomo --no-pager --since "10 min ago" | grep "域名关键字" | 
 ### 3. 切到稳定节点并验证
 
 ```bash
+# 所有 API 调用统一加认证头（SECRET 从 config.yaml 的 secret: 字段取）
+API="http://127.0.0.1:8765"; AUTH="Authorization: Bearer <secret>"
+
 # 查候选地区自动选择组的当前节点
-curl -s http://127.0.0.1:9090/proxies | python3 -c "
+curl -s -H "$AUTH" $API/proxies | python3 -c "
 import json,sys
 d=json.load(sys.stdin)['proxies']
 for k in ['美国自动选择','日本自动选择','新加坡自动选择','香港自动选择','台湾自动选择']:
@@ -54,12 +58,12 @@ for k in ['美国自动选择','日本自动选择','新加坡自动选择','香
 URL="https://目标域名/"
 for g in 美国自动选择 日本自动选择 新加坡自动选择; do
   enc=$(python3 -c "import urllib.parse;print(urllib.parse.quote('$g'))")
-  echo "$g: $(curl -s --max-time 10 "http://127.0.0.1:9090/proxies/$enc/delay?url=$URL&timeout=5000")"
+  echo "$g: $(curl -s -H "$AUTH" --max-time 10 "$API/proxies/$enc/delay?url=$URL&timeout=5000")"
 done
 
 # 切组
 G="其他"; T="美国自动选择"   # T 可以是子组名或具体节点名
-curl -s -X PUT "http://127.0.0.1:9090/proxies/$(python3 -c "import urllib.parse;print(urllib.parse.quote('$G'))")" \
+curl -s -H "$AUTH" -X PUT "$API/proxies/$(python3 -c "import urllib.parse;print(urllib.parse.quote('$G'))")" \
   -H "Content-Type: application/json" -d "{\"name\":\"$T\"}" -w "切换 HTTP %{http_code}\n"
 
 # 验证（至少连测 5 次，风控有抖动）
