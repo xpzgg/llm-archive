@@ -1,6 +1,27 @@
 - [ ] radix-tree, rb-tree, maple-tree关系
 - [ ] anonymous and file-backed vma
 - [ ] PGD 的地址是怎么得到的？
+- [ ] SVA（Shared Virtual Addressing）学习，重点关注 GPU 场景：设备共享进程地址空间（PASID + IOPF），与 GPU 统一内存（OpenCL SVM / CUDA UVA）的关系；主线演进：v5.10 arm-smmu-v3 SVA（Jean-Philippe Brucker），6.x 重构为 SVA domain（Jason Gunthorpe）
+- [ ] 搞一个 data abort 分析脚本（放 `scripts/`）
+- [ ] 写内存问题分析文档：UAF、data abort 等（放 `docs/`）
+
+## 学习优先级（2026-09 评估：分配侧已覆盖，回收侧空白）
+
+1. SLUB 主线（v6.x 经典架构，补 `slub.md` 正文）
+2. rmap / anon_vma（回收的总开关）
+3. 回收链路：LRU → kswapd → direct reclaim → vmscan（与 OOM 笔记闭环）
+4. swap / zswap / zram（回收链路下游，顺手补）
+5. 文件缺页 + page cache：filemap_fault / xarray / writeback（page-fault 笔记只走了匿名分支）
+6. 按需再挑：THP collapse、compaction、memcg、NUMA balancing、IOMMU
+
+说明：上面 todo 里的"anonymous vs file-backed vma"会在 2 和 5 中自然解决，不单独学。
+
+## 学习方式约定
+
+- 回收链路用真实问题开局（内存压力/OOM/data abort），查到什么学什么
+- 看代码前先写预测，再对照实现，重点记预测错的地方
+- 收尾产出放 `docs/`：写成排查复盘/指南，不写成百科
+- 能动手就动手：加 tracepoint、写触发路径的小程序验证理解
 
 
 

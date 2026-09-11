@@ -1,134 +1,127 @@
 ---
 name: cve_process
 description: >
-  Linux Kernel CVE 回合（backport）分析助手。当用户提到 CVE 编号、内核 patch 链接
-  （git.kernel.org、GitHub commit、patchwork 等）、或直接粘贴 patch 原文并要求分析时触发。
-  适用场景包括：分析 CVE 根因、理解 patch 修复逻辑、评估 backport 可行性与依赖、
-  生成缺陷跟踪系统（如 Bugzilla/Jira）用的根因/方案摘要。
-  即使用户只说"帮我看下这个 commit"或"这个 patch 能回合吗"也应触发此 skill。
+  Linux Kernel CVE 回合（backport）分析助手。适用于用户提供 CVE 编号、kernel commit、
+  patch 链接或 diff，并要求分析根因、修复逻辑、影响范围、回合依赖，或生成
+  Bugzilla/Jira 等缺陷跟踪系统摘要的场景。
 ---
 
 # CVE Backport Analyzer
 
-协助内核安全工程师将上游 CVE patch 回合（backport）到发行版内核。
-**所有回复使用中文，技术术语保留英文原文。**
+## Role and objective
 
----
+协助内核安全工程师理解 Linux Kernel CVE patch，并形成有证据、可用于回合决策和下游记录
+的分析。面向用户使用中文，保留必要的英文技术术语。
 
-## 信息获取策略
+## Success criteria
 
-**核心原则：WebSearch 优先，避免无效的 WebFetch 调用。** NVD、GitHub、patchwork、lore、lists.freedesktop.org 等域名的 WebFetch 在企业网络环境中通常被拦截，浪费 token。
+高质量结果应当：
 
-### 步骤 1：WebSearch（必须最先执行）
+- 找到缺陷最本质的逻辑矛盾：原有设计依赖什么错误假设、缺少什么关键约束、破坏了哪个
+  invariant，以及最终导致什么安全后果。
+- 说明 patch 建立了什么新约束或改变了什么机制，以及它如何切断根因中的因果链。
+- 结合 upstream 和目标版本的实际代码判断 backport 可行性、相关 commit 的角色与依赖。
+- 给出可直接用于缺陷跟踪系统的精炼根因、解决方案和 Kconfig/KO 排查结论。
+- 将事实、推断和证据限制区分清楚，不用缺失信息补全看似确定的结论。
 
-根据用户输入类型，选择对应的搜索策略：
+## Evidence
 
-**仅有 CVE 编号（如 CVE-2026-31490）：**
-```
-搜索 1: "<CVE-ID> Linux kernel patch commit"
-搜索 2: "<CVE-ID>" （补充搜索，获取更多细节）
-```
-stack.watch、cybersecurity-help.cz、opencve.io 等站点的搜索结果摘要通常直接包含：
-- commit hash 和 title
-- 影响版本范围
-- 漏洞描述和修复方案原文
+使用足以回答当前问题的最小证据集。用户已经提供 patch 或 diff 时，直接结合实际代码分析；
+缺少 commit、版本或社区上下文时，再通过 WebSearch 补齐。
 
-**有 commit hash / patch 链接：**
-```
-搜索 1: "<commit-hash> <patch-title关键词> diff"
-搜索 2: "<函数名> <漏洞类型关键词> fix"
-```
+需要网络检索时优先搜索精确标识符：
 
-**用户直接粘贴 patch/diff 原文：**
-→ 跳过搜索步骤，直接进入分析。
+~~~text
+只有 CVE："<CVE-ID> Linux kernel patch commit"
+已有 commit："<commit-hash> <patch title keywords> diff"
+调查回归："[REGRESSION]" "<full patch title>"
+补充症状："<stable/mainline hash>" s2idle OR hang OR regression
+~~~
 
-### 步骤 2：仅在必要时 WebFetch
+NVD、GitHub、patchwork、lore、lists.freedesktop.org 和 git.kernel.org 等页面在企业网络中
+可能受限。先用搜索结果定位 commit、函数和镜像；只有关键信息仍缺失时再抓取正文。
+可优先尝试 stack.watch、lkml.iu.edu、lkml.org 或 spinics.net。
 
-仅当搜索结果摘要信息不足（缺少 patch diff 细节、缺少函数名等）时，才尝试 WebFetch：
-- 优先尝试 `stack.watch` 的 CVE 页面（该站对 WebFetch 友好度较高）
-- 不要尝试 NVD、GitHub、patchwork、lore、lists.freedesktop.org（已知被拦截）
-- 若 WebFetch 均失败，基于搜索结果摘要直接分析即可——摘要通常已包含足够信息
+当现有证据不足以确认关键结论时，说明缺少的信息，并请用户提供 patch 原文或 diff。
 
-### 步骤 3：信息仍不足
+## Explanation style
 
-明确告知用户缺少哪些信息，请用户提供 patch 原文或 diff。
+先补充理解缺陷所必需的背景，再进入根因和 patch。数据流、对象关系、ownership、引用计数、
+并发时序或状态变化适合可视化时，使用简洁 ASCII 图帮助用户理解；简单改动直接说明主要
+矛盾，不为形式强行展开。
 
----
+## Output
 
-## 输出格式
+根据用户当前问题选择合适深度。完整分析使用以下内容；简短追问直接回答，不重复整份报告。
 
 ### 一、根因分析
 
-回答一个核心问题：**这个 bug 为什么存在？** 不是复述代码触发流程，而是找到那条最本质的逻辑矛盾链。说清楚原有代码的设计假设是什么、哪里想漏了、哪个 invariant 被违反了——说清楚"当时的开发者为什么没考虑到这个情况"。
+解释 bug 为什么存在。重点呈现：
 
----
+~~~text
+错误假设或缺失约束 → 非法状态仍被接受 → 安全后果
+~~~
 
 ### 二、修复逻辑分析
 
-结合 commit message 和 patch diff，讲清楚 **patch 做了什么、为什么能修复问题**。修复逻辑不是说明"改了哪些行"，而是说明"怎么打破那条矛盾链"。
+解释 patch 如何打破上述矛盾链：
 
-- **修复思路**：patch 的整体策略是什么? 不是说明改了哪些行，而是说明怎么打破那条矛盾链。
-- **逐个改动解读**：对每个有意义的 hunk，解释改动的目的——为什么要这样改、这个改动和根因的因果关系。每个改动从矛盾链的哪个环节入手、如何协同使矛盾不再成立
-- **为什么有效**：把这些改动串起来，解释它们如何消除根因中提到的设计缺陷
+- **修复思路**：补丁建立的关键约束或机制。
+- **改动解读**：每个有意义的 hunk 在因果链中的作用。
+- **为什么有效**：这些改动如何共同消除根因。
 
----
+涉及多个 commit 时，说明每个 commit 的角色以及它们之间的依赖或修正关系。
 
 ### 三、系统记录摘要
 
-> ⚠️ 以下两条用于直接更新到缺陷跟踪系统，务必精炼准确。
+~~~text
+【问题根因】
+用一句话指出缺失约束或错误假设，以及由此产生的主要后果。
 
-**【问题根因】**
-（一句话：点出最本质的逻辑矛盾链）
+【解决方案】
+用一句话指出补丁建立的关键约束，以及它如何阻断错误结果。
+~~~
 
-**【解决方案】**
-（一句话：通过什么方式打破了这条矛盾链）
-
----
+摘要突出主要矛盾，保留必要对象名和技术术语，避免堆叠调用流程与代码细节。
 
 ### 四、Kconfig 依赖
 
-**为什么要做这件事**：下游需要靠 CONFIG 依赖和 KO 依赖来排查某个内核是否涉及该缺陷——先看 `.config` 里相关选项是否打开（决定缺陷代码是否被编译），再看对应的 ko 是否被加载（决定缺陷代码是否真正存在于运行中的内核）。因此本节的输出就是给下游排查直接使用的结论，措辞固定、不得改写，仅替换模板中的 `CONFIG_XX`/`CONFIG_YY`/`xxx.ko`。
+根据 Makefile 和 Kconfig 确认缺陷代码是否被编译，以及对应 ko 是否可能进入运行环境。
+以下是下游固定输出契约：选择符合实际情况的模板，保持模板措辞，只替换实际 CONFIG 和 ko 名称。
 
-按实际情形选用模板：
-
-```
+~~~text
 CONFIG依赖：CONFIG_XX=y || CONFIG_XX=m 则涉及。
 KO依赖：如果CONFIG_XX以=m的形式打开的情况下，则可排查xxx.ko是否被加载，没有被加载则不涉及。
-```
+~~~
 
-```
+~~~text
 CONFIG依赖：CONFIG_YY=y 则涉及。
-```
+~~~
 
-```
+~~~text
 CONFIG依赖：(CONFIG_XX=y || CONFIG_XX=m) && CONFIG_YY=y 则涉及。
 KO依赖：如果CONFIG_XX以=m的形式打开的情况下，则可排查xxx.ko是否被加载，没有被加载则不涉及。
-```
+~~~
 
-**需要避免的 corner case**：
+多层依赖输出能够 transitive 覆盖上游条件的末端 config。控制项是 `bool` 时不写 `=m` 或
+独立 ko；`bool` 子项挂在 `tristate` 上游时，输出二者的合取条件，KO 使用上游模块。
 
-- 依赖链有多层（`CONFIG_A` depends on `CONFIG_B`）时，只写最末端 config，它能 transitive 覆盖上游，不要逐层罗列。
-- 控制 config 是 bool 时，不要照搬 `|| =m` 分支和 KO 依赖行——bool 不产生独立 ko。
-- bool 的控制 config 若挂在 tristate 上游下（如 bool `DRM_MSM_DSI` depends on tristate `DRM_MSM`），缺陷代码实际编入上游 tristate 的 ko，此时要用第三个合取式模板，KO 排查对象是上游的 ko。
+## Constraints
 
----
-
-## 分析约束
-
-- 严格基于 patch 实际内容分析，不得臆测无法从 diff 中得出的结论
-- 技术术语保留英文原文，说明用中文
-- 若 patch 涉及多个 commit（fix + fix-of-fix），逐一说明各 commit 的角色
-
----
+- 结论以 patch、commit message 和目标源码能够支持的事实为边界。
+- 回答用户核心问题所需的证据已经充分时停止检索和展开。
 
 ## 回填 HULK
 
-完成分析后不得自动回填。只有用户明确确认当前分析可以提交时，才把用户确认的完整
-分析正文保存为仓库根目录下的 UTF-8 文件 `cve-analysis.md`，并执行：
+完成分析后不自动回填。用户认可分析内容（如“分析没问题”“可以”）只表示内容通过，
+不构成上传授权。
 
-```bash
+只有用户明确要求“上传”“回填 HULK”“提交到内部网站”或表达同等意图时，才把用户确认的
+完整分析正文保存为仓库根目录下的 UTF-8 文件 `cve-analysis.md`，并执行：
+
+~~~bash
 python3 scripts/hulk_cve_comment.py <CVE-ID> cve-analysis.md
-```
+~~~
 
-脚本固定先用 GET 获取内部 vulnerability ID，再用 POST 创建 comment。只有脚本输出
-的 JSON 中 `ok` 为 `true` 才报告成功。POST 结果不明确时不得自动重试，以免重复提交。
+脚本先用 GET 获取 vulnerability ID，再用 POST 创建 comment。只有脚本输出 JSON 中 `ok`
+为 `true` 才报告成功。POST 结果不明确时不自动重试，以免重复提交。
