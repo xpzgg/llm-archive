@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1680" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <defs>
+    <marker id="mD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5d6d7e"/>
+    </marker>
+  </defs>
+
+  <text x="640" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#1b2631">SLUB 分配路径（Linux v6.6）</text>
+  <text x="640" y="58" text-anchor="middle" font-size="11.5" fill="#7f8c8d">kmem_cache_alloc → slab_alloc_node → ___slab_alloc · mm/slub.c · [ ] 内为 /proc/slabinfo 统计项</text>
+
+  <!-- 入口 -->
+  <rect x="240" y="76" width="200" height="36" rx="18" fill="#eaf2f8" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="99" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1b2631">kmem_cache_alloc(s)</text>
+  <path d="M 340,112 L 340,162" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <!-- ===== 快路径 ===== -->
+  <rect x="90" y="130" width="860" height="110" rx="8" fill="#f2f9f4" stroke="#1e8449" stroke-width="1.2"/>
+  <text x="936" y="152" text-anchor="end" font-size="12" font-weight="bold" fill="#1e8449">快路径 slab_alloc_node（无锁，不禁抢占）</text>
+  <polygon points="190,196 340,164 490,196 340,228" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="192" text-anchor="middle" font-size="10.5" fill="#1b2631">c-&gt;freelist 非空 且</text>
+  <text x="340" y="207" text-anchor="middle" font-size="10.5" fill="#1b2631">node 匹配？</text>
+  <text x="498" y="188" font-size="10" fill="#1e8449">是</text>
+  <path d="M 490,196 L 556,196" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="560" y="170" width="370" height="52" rx="6" fill="#eafaf1" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="575" y="190" font-size="10.5" fill="#1b2631">this_cpu_cmpxchg pop 链头，返回对象</text>
+  <text x="575" y="208" font-size="10" fill="#566573">统计：ALLOC_FASTPATH —— 绝大多数分配在此结束</text>
+  <text x="348" y="252" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,228 L 340,292" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <!-- ===== 阶段 1 ===== -->
+  <rect x="90" y="258" width="860" height="590" rx="8" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.2"/>
+  <text x="936" y="280" text-anchor="end" font-size="12" font-weight="bold" fill="#2471a3">阶段 1：尝试继续使用当前 slab（___slab_alloc 前半）</text>
+
+  <polygon points="230,320 340,294 450,320 340,346" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="324" text-anchor="middle" font-size="10.5" fill="#1b2631">c-&gt;slab == NULL？</text>
+  <text x="458" y="312" font-size="10" fill="#1b2631">是</text>
+  <path d="M 450,320 L 496,320" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="512" cy="320" r="14" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="512" y="324" text-anchor="middle" font-size="9" font-weight="bold" fill="#b9770e">S2</text>
+
+  <path d="M 340,346 L 340,412" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <!-- R 到达点：只有出圈箭头，汇入脊柱 -->
+  <circle cx="384" cy="379" r="14" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="384" y="383" text-anchor="middle" font-size="9" font-weight="bold" fill="#2471a3">R</text>
+  <path d="M 370,379 L 344,379" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <text x="404" y="383" font-size="9.5" fill="#2471a3">redo 重新校验点</text>
+
+  <polygon points="215,440 340,412 465,440 340,468" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="436" text-anchor="middle" font-size="10.5" fill="#1b2631">node / pfmemalloc</text>
+  <text x="340" y="451" text-anchor="middle" font-size="10.5" fill="#1b2631">匹配？</text>
+  <text x="472" y="432" font-size="10" fill="#1b2631">否</text>
+  <path d="M 465,440 L 536,440" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="416" width="320" height="48" rx="6" fill="#f2f3f4" stroke="#7f8c8d" stroke-width="1.3"/>
+  <text x="554" y="435" font-size="10.5" fill="#1b2631">deactivate_slab 卸任当前 slab</text>
+  <text x="554" y="452" font-size="9.5" fill="#566573">（去向见右侧面板）→ 阶段 2</text>
+  <path d="M 860,440 L 872,440" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="886" cy="440" r="14" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="886" y="444" text-anchor="middle" font-size="9" font-weight="bold" fill="#b9770e">S2</text>
+  <text x="348" y="484" font-size="10" fill="#1b2631">是</text>
+  <path d="M 340,468 L 340,492" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="225" y="492" width="230" height="48" rx="6" fill="#ffffff" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="340" y="510" text-anchor="middle" font-size="10" fill="#1b2631">持 local_lock，重读 c-&gt;slab</text>
+  <text x="340" y="527" text-anchor="middle" font-size="9.5" fill="#566573">（被抢占变了 → 回 R）</text>
+  <path d="M 340,540 L 340,562" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="200,592 340,562 480,592 340,622" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="588" text-anchor="middle" font-size="10.5" fill="#1b2631">c-&gt;freelist 非空？</text>
+  <text x="340" y="603" text-anchor="middle" font-size="9.5" fill="#566573">（中断可能刚释放过对象）</text>
+  <text x="488" y="584" font-size="10" fill="#1b2631">是</text>
+  <path d="M 480,592 L 536,592" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="568" width="390" height="48" rx="6" fill="#eafaf1" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="554" y="586" font-size="10.5" fill="#1b2631">load_freelist：返回链头对象</text>
+  <text x="554" y="604" font-size="9.5" fill="#566573">c-&gt;freelist ← 链的剩余部分</text>
+  <text x="348" y="638" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,622 L 340,656" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="190,688 340,656 490,688 340,720" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="684" text-anchor="middle" font-size="10.5" fill="#1b2631">get_freelist：</text>
+  <text x="340" y="699" text-anchor="middle" font-size="10.5" fill="#1b2631">slab-&gt;freelist 非空？</text>
+  <text x="498" y="680" font-size="10" fill="#1b2631">是</text>
+  <path d="M 490,688 L 536,688" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="650" width="390" height="70" rx="6" fill="#eaf2fb" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="554" y="668" font-size="10.5" font-weight="bold" fill="#1b2631">整链收编（cmpxchg）：slab-&gt;freelist → NULL</text>
+  <text x="554" y="685" font-size="10" fill="#1b2631">inuse = objects，保持 frozen，→ load_freelist 返回</text>
+  <text x="554" y="702" font-size="9.5" fill="#566573">统计：ALLOC_REFILL</text>
+  <text x="348" y="736" font-size="9.5" fill="#1b2631">否（全满）</text>
+  <path d="M 340,720 L 340,744" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="225" y="744" width="230" height="64" rx="6" fill="#f2f3f4" stroke="#7f8c8d" stroke-width="1.3"/>
+  <text x="340" y="762" text-anchor="middle" font-size="10" fill="#1b2631">全满卸任：frozen=0（get_freelist 完成）</text>
+  <text x="340" y="779" text-anchor="middle" font-size="10" fill="#1b2631">c-&gt;slab = NULL</text>
+  <text x="340" y="795" text-anchor="middle" font-size="9.5" fill="#566573">统计：DEACTIVATE_BYPASS</text>
+  <path d="M 340,808 L 340,820" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="340" cy="834" r="14" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="340" y="838" text-anchor="middle" font-size="9" font-weight="bold" fill="#b9770e">S2</text>
+
+  <!-- ===== 阶段 2 ===== -->
+  <rect x="90" y="870" width="860" height="380" rx="8" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.2"/>
+  <text x="936" y="892" text-anchor="end" font-size="12" font-weight="bold" fill="#b9770e">阶段 2：获取下一张 slab（成本递增）</text>
+
+  <!-- S2 到达点：只有出圈箭头 -->
+  <circle cx="340" cy="916" r="14" fill="#fdf6ec" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="340" y="920" text-anchor="middle" font-size="9" font-weight="bold" fill="#b9770e">S2</text>
+  <path d="M 340,930 L 340,948" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="200,976 340,948 480,976 340,1004" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="980" text-anchor="middle" font-size="10.5" fill="#1b2631">cpu_slab-&gt;partial 非空？</text>
+  <text x="488" y="968" font-size="10" fill="#1b2631">是</text>
+  <path d="M 480,976 L 536,976" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="950" width="340" height="52" rx="6" fill="#ffffff" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="554" y="968" font-size="10.5" fill="#1b2631">取链头装为 c-&gt;slab</text>
+  <text x="554" y="985" font-size="9.5" fill="#566573">统计：CPU_PARTIAL_ALLOC → 回 R 重新校验</text>
+  <path d="M 880,976 L 896,976" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="910" cy="976" r="14" fill="#f4f8fd" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="910" y="980" text-anchor="middle" font-size="9" font-weight="bold" fill="#2471a3">R</text>
+  <text x="348" y="1020" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,1004 L 340,1026" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="225" y="1026" width="230" height="48" rx="6" fill="#ffffff" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="340" y="1044" text-anchor="middle" font-size="10" fill="#1b2631">get_partial：node-&gt;partial 取一张</text>
+  <text x="340" y="1061" text-anchor="middle" font-size="9.5" fill="#566573">（持 list_lock）</text>
+  <path d="M 340,1074 L 340,1098" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <polygon points="240,1126 340,1098 440,1126 340,1154" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="1130" text-anchor="middle" font-size="10.5" fill="#1b2631">取到 slab？</text>
+  <text x="448" y="1118" font-size="10" fill="#1b2631">是</text>
+  <path d="M 440,1126 L 486,1126" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <circle cx="502" cy="1126" r="14" fill="#f7f2fa" stroke="#7d3c98" stroke-width="1.3"/>
+  <text x="502" y="1130" text-anchor="middle" font-size="9" font-weight="bold" fill="#7d3c98">S3</text>
+  <text x="348" y="1170" font-size="10" fill="#1b2631">否</text>
+  <path d="M 340,1154 L 340,1176" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="225" y="1176" width="230" height="48" rx="6" fill="#ffffff" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="340" y="1194" text-anchor="middle" font-size="10" fill="#1b2631">new_slab：向 buddy 申请新页</text>
+  <text x="340" y="1211" text-anchor="middle" font-size="9.5" fill="#566573">（首次失败可降级 order：oo→min）</text>
+  <path d="M 340,1224 L 340,1302" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <!-- ===== 阶段 3 ===== -->
+  <rect x="90" y="1266" width="860" height="374" rx="8" fill="#f7f2fa" stroke="#7d3c98" stroke-width="1.2"/>
+  <text x="936" y="1288" text-anchor="end" font-size="12" font-weight="bold" fill="#7d3c98">阶段 3：激活（装为本 CPU 的活跃 slab）</text>
+
+  <polygon points="250,1330 340,1304 430,1330 340,1356" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="1334" text-anchor="middle" font-size="10.5" fill="#1b2631">成功？</text>
+  <text x="438" y="1322" font-size="10" fill="#1b2631">否</text>
+  <path d="M 430,1330 L 536,1330" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="1306" width="390" height="48" rx="6" fill="#fdedec" stroke="#c0392b" stroke-width="1.3"/>
+  <text x="554" y="1324" font-size="10.5" fill="#1b2631">返回 NULL（slab_out_of_memory）</text>
+  <text x="554" y="1341" font-size="9.5" fill="#566573">（buddy 也分配失败 = 本次分配失败）</text>
+  <text x="348" y="1372" font-size="10" fill="#1b2631">是</text>
+  <path d="M 340,1356 L 340,1378" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="210" y="1378" width="260" height="68" rx="6" fill="#ffffff" stroke="#b9770e" stroke-width="1.3"/>
+  <text x="340" y="1392" text-anchor="middle" font-size="9.5" fill="#1b2631">整链移交（无 cmpxchg 的私有窗口）：</text>
+  <text x="340" y="1408" text-anchor="middle" font-size="9.5" fill="#1b2631">freelist = slab-&gt;freelist，slab-&gt;freelist = NULL</text>
+  <text x="340" y="1423" text-anchor="middle" font-size="9.5" fill="#1b2631">inuse = objects，frozen = 1</text>
+  <text x="340" y="1438" text-anchor="middle" font-size="9" fill="#566573">统计：ALLOC_SLAB</text>
+
+  <path d="M 340,1446 L 340,1498" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <!-- S3 到达点：只有出圈箭头，汇入脊柱 -->
+  <circle cx="296" cy="1472" r="14" fill="#f7f2fa" stroke="#7d3c98" stroke-width="1.3"/>
+  <text x="296" y="1476" text-anchor="middle" font-size="9" font-weight="bold" fill="#7d3c98">S3</text>
+  <path d="M 310,1472 L 336,1472" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <text x="362" y="1462" font-size="9.5" fill="#7d3c98">两路 slab 在此汇合</text>
+
+  <polygon points="190,1526 340,1498 490,1526 340,1554" fill="#ffffff" stroke="#34495e" stroke-width="1.3"/>
+  <text x="340" y="1522" text-anchor="middle" font-size="10.5" fill="#1b2631">local_lock 后</text>
+  <text x="340" y="1537" text-anchor="middle" font-size="10.5" fill="#1b2631">c-&gt;slab 仍为空？</text>
+  <text x="496" y="1518" font-size="10" fill="#1b2631">否</text>
+  <path d="M 490,1526 L 536,1526" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+  <rect x="540" y="1494" width="390" height="64" rx="6" fill="#f4ecf7" stroke="#7d3c98" stroke-width="1.3"/>
+  <text x="554" y="1511" font-size="10" fill="#1b2631">抢占期间 c-&gt;slab 被装上别的 slab：</text>
+  <text x="554" y="1527" font-size="10" fill="#1b2631">deactivate_slab 冲掉 → 重试本步（retry_load_slab）</text>
+  <text x="554" y="1544" font-size="9.5" fill="#566573">统计：CPUSLAB_FLUSH</text>
+  <text x="348" y="1574" font-size="10" fill="#1b2631">是</text>
+  <path d="M 340,1554 L 340,1580" stroke="#5d6d7e" stroke-width="1.5" fill="none" marker-end="url(#mD)"/>
+
+  <rect x="210" y="1580" width="260" height="52" rx="6" fill="#eafaf1" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="340" y="1598" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1b2631">c-&gt;slab = slab，c-&gt;freelist ← 余链</text>
+  <text x="340" y="1616" text-anchor="middle" font-size="10.5" fill="#1b2631">返回链头对象（分配完成）</text>
+
+  <!-- ===== 右侧面板 ===== -->
+  <rect x="980" y="258" width="270" height="470" rx="8" fill="#fbfcfc" stroke="#566573" stroke-width="1.2"/>
+  <text x="996" y="284" font-size="12.5" font-weight="bold" fill="#1b2631">附 1：deactivate_slab 去向</text>
+  <text x="996" y="308" font-size="10" fill="#2e4053">• 仍有空闲对象 → node partial</text>
+  <text x="996" y="326" font-size="9.5" fill="#7f8c8d">　含远程 frees 的挂尾部，否则挂头部</text>
+  <text x="996" y="350" font-size="10" fill="#2e4053">• 全空 → nr_partial ≥ min_partial</text>
+  <text x="996" y="368" font-size="9.5" fill="#7f8c8d">　则还给 buddy；不足则留 node partial</text>
+  <text x="996" y="392" font-size="10" fill="#2e4053">• 全满 → 不挂任何链表（无主）</text>
+  <path d="M 996,412 L 1234,412" stroke="#d5dbdb" stroke-width="1"/>
+  <text x="996" y="438" font-size="12.5" font-weight="bold" fill="#1b2631">附 2：load_freelist 做什么</text>
+  <text x="996" y="462" font-size="10" fill="#2e4053">c-&gt;freelist ← 链的剩余部分；</text>
+  <text x="996" y="480" font-size="10" fill="#2e4053">链头对象作为分配结果返回</text>
+  <path d="M 996,500 L 1234,500" stroke="#d5dbdb" stroke-width="1"/>
+  <text x="996" y="526" font-size="12.5" font-weight="bold" fill="#1b2631">图例</text>
+  <rect x="996" y="538" width="14" height="14" fill="#f2f9f4" stroke="#1e8449"/>
+  <text x="1018" y="549" font-size="9.5" fill="#2e4053">快路径（无锁）</text>
+  <rect x="996" y="560" width="14" height="14" fill="#f4f8fd" stroke="#2471a3"/>
+  <text x="1018" y="571" font-size="9.5" fill="#2e4053">阶段 1：继续使用当前 slab</text>
+  <rect x="996" y="582" width="14" height="14" fill="#fdf6ec" stroke="#b9770e"/>
+  <text x="1018" y="593" font-size="9.5" fill="#2e4053">阶段 2：获取下一张 slab</text>
+  <rect x="996" y="604" width="14" height="14" fill="#f7f2fa" stroke="#7d3c98"/>
+  <text x="1018" y="615" font-size="9.5" fill="#2e4053">阶段 3：激活</text>
+  <text x="996" y="646" font-size="9.5" fill="#7f8c8d">圆圈 = 转接符号，同名相连：</text>
+  <text x="996" y="664" font-size="9.5" fill="#7f8c8d">箭头进圈 = 跳离此处；箭头出圈 = 跳转到此</text>
+  <text x="996" y="682" font-size="9.5" fill="#7f8c8d">[ ] 内为 /proc/slabinfo 统计项</text>
+  <text x="996" y="700" font-size="9.5" fill="#7f8c8d">绿底 = 成功返回；灰底 = 卸任处理</text>
+</svg>

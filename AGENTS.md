@@ -102,6 +102,28 @@ If a result becomes part of the stable knowledge base, move or rewrite it into `
 - For Linux kernel topics, distinguish stable concepts from version-sensitive implementation details.
 - Keep generated HTML, Draw.io files, logs, and large outputs out of prose note directories unless they are the primary artifact.
 
+## Explanation Style (Teaching / Learning Sessions)
+
+When explaining complex technical concepts (kernel subsystems, allocator design, etc.) — in conversation or in notes. These are heuristics to apply with judgment, not a mandatory script; skip whatever does not fit the moment.
+
+- **Open with the promise and the crux.** One sentence on what the user will be able to answer after this session, and the core problem the mechanism exists to solve — OSTEP-style: "The crux of the problem is ...". State the problem before explaining any mechanism.
+- **Give the overview, then stop.** What the concept is → the key structures/components and each one's responsibility → why it exists and why it is shaped this way (the problem it solves, the design pressure behind it) → how they relate and form a system — and hold there. Do not open with struct fields or code-level detail, and do not expand into deeper layers on your own.
+- **Go deeper only where the user asks.** Depth is user-driven: explain the layer they asked about, not the layer that seems next.
+- **Don't tell, let them experience — with brakes.** When expanding, prefer leading with the question that opens onto the mechanism and let the user think first. But tell directly when: (a) the user asks you to just explain; (b) they have been stuck on the same point long enough that more struggle adds nothing; (c) what is missing is an underivable fact (a definition, an API, a hardware behavior) — hand over the fact, no suspense.
+- **Code walkthroughs:** before reading through a function or flow, state What it does (its role in the bigger picture, inputs/outputs, responsibility boundary) and Why it exists / why it is shaped that way (which design decision it embodies); only then walk the How. Never open a walkthrough with line-by-line code.
+- **No real-world metaphors.** Use direct technical language. Precise correspondences to concepts the user already knows (e.g. "SLUB's cpu_slab plays the same role as buddy's PCP") are encouraged. Do not invent casual translations for technical terms — use the original term (e.g. `seal`, `F_SEAL_WRITE`) and state plainly what the mechanism does.
+- The user is transitioning to AI infrastructure work. When a topic has GPU / AI-Infra relevance (training, inference, NCCL, CUDA, PyTorch, /dev/shm, pinned memory, etc.), explicitly call out those connections. `notes/mm/overview.md` tags such modules with `gpu`.
+
+## SVG Diagram Conventions
+
+When hand-writing SVG diagrams (examples: `notes/mm/slub/slub-overview.svg`, `notes/mm/slub/slub-alloc-path.svg`):
+
+- **Jumps use connector circles, never long arrows.** For goto-like flow: at the jump-away point, draw the arrow INTO a named circle; at the arrival point, place a same-named circle beside the flow with only an outgoing arrow merging into it. State the convention in a legend ("arrow into circle = jump away; arrow out of circle = arrive here").
+- **Keep elements off container borders.** Boxes must not touch or coincide with lane/group rectangle edges — leave ~20px margin.
+- **Lane labels go top-right, right-aligned**, so they never collide with the flow spine or decision diamonds.
+- **Verify connectivity.** Gaps between flow segments happen easily (e.g. across lane boundaries) — check every transition actually has its arrow.
+- **Always render and inspect before handing to the user**: `qlmanage -t -s 1600 -o /tmp <file>.svg`, view the PNG, zoom into dense regions to catch text overflow and overlaps, fix, then `open` the SVG. For coordinate-cascading changes a full rewrite is acceptable; use Edit for localized fixes.
+
 ## Operational Notes
 
 - Use `rg` / `rg --files` for repository search.

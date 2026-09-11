@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SLUB 释放路径（Linux v6.6）</title>
+<style>
+  :root {
+    --ink: #1b2631;
+    --gray: #566573;
+    --faint: #7f8c8d;
+    --wire: #5d6d7e;
+    --fast: #1e8449;  --fast-bg: #f2f9f4;  --fast-term: #eafaf1;
+    --slow: #2471a3;  --slow-bg: #f4f8fd;  --slow-term: #eaf2fb;
+    --buddy: #b9770e; --buddy-term: #fdf6ec;
+    --keep: #7f8c8d;  --keep-term: #f2f3f4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 16px;
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); background: #fff;
+  }
+  h1 { text-align: center; font-size: 21px; margin: 0 0 6px; }
+  .sub { text-align: center; font-size: 12px; color: var(--faint); margin: 0 0 22px; }
+  .page { display: flex; gap: 22px; max-width: 1440px; margin: 0 auto; align-items: flex-start; }
+  .diagram { flex: 0 0 1080px; }
+  .panel {
+    flex: 1; border: 1.2px solid var(--gray); border-radius: 8px;
+    background: #fbfcfc; padding: 16px 18px; font-size: 13px; line-height: 1.55;
+  }
+  .panel h3 { font-size: 13.5px; margin: 14px 0 6px; }
+  .panel h3:first-child { margin-top: 0; }
+  .panel ul { margin: 0; padding-left: 18px; }
+  .panel li { margin: 3px 0; }
+  .panel .note { color: var(--faint); font-size: 12px; }
+  .panel hr { border: none; border-top: 1px solid #d5dbdb; margin: 12px 0; }
+  .chip { display: inline-block; width: 12px; height: 12px; border: 1px solid; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+
+  /* ---------- 节点 ---------- */
+  .start {
+    width: 210px; margin: 0 auto; padding: 8px 0; text-align: center;
+    font-size: 13px; font-weight: 700; border: 1.3px solid #34495e;
+    border-radius: 18px; background: #eaf2f8;
+  }
+  .action {
+    width: 300px; margin: 0 auto; padding: 7px 12px; text-align: center;
+    font-size: 12.5px; background: #fff; border: 1.3px solid var(--gray); border-radius: 6px;
+  }
+  .action .dim, .term .dim { color: var(--gray); font-size: 11px; }
+
+  /* 菱形：外层 clip-path 当边框，内层白底 */
+  .decision {
+    width: 280px; height: 70px; margin: 0 auto;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    background: #34495e; padding: 1.3px;
+  }
+  .decision > div {
+    width: 100%; height: 100%;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    background: #fff; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    font-size: 12.5px; line-height: 1.3;
+  }
+  .decision .dim { color: var(--gray); font-size: 10.5px; }
+
+  /* 终止/处理框 */
+  .term {
+    width: 300px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4;
+    border: 1.3px solid; border-radius: 6px;
+  }
+  .term .stat { color: var(--gray); font-size: 11px; margin-top: 2px; }
+  .t-fast  { background: var(--fast-term);  border-color: var(--fast); }
+  .t-slow  { background: var(--slow-term);  border-color: var(--slow); }
+  .t-buddy { background: var(--buddy-term); border-color: var(--buddy); }
+  .t-keep  { background: var(--keep-term);  border-color: var(--keep); }
+  .term.spine { margin: 0 auto; width: 280px; text-align: center; }
+
+  /* ---------- 连线 ---------- */
+  .vconn { width: 2px; height: 24px; margin: 0 auto; background: var(--wire); position: relative; }
+  .vconn::after {
+    content: ""; position: absolute; left: -4px; bottom: 0;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 7px solid var(--wire);
+  }
+  .vconn .lbl { position: absolute; left: 9px; top: 2px; font-size: 11px; white-space: nowrap; }
+
+  .row { position: relative; }
+  .rib {
+    position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center;
+  }
+  .harrow { width: 48px; height: 2px; background: var(--wire); position: relative; flex: none; }
+  .harrow::after {
+    content: ""; position: absolute; right: 0; top: -4px;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 7px solid var(--wire);
+  }
+  .harrow .lbl { position: absolute; top: -16px; left: 8px; font-size: 11px; }
+
+  /* 转接圆圈 */
+  .jump {
+    width: 28px; height: 28px; border-radius: 50%; flex: none;
+    border: 1.3px solid var(--slow); color: var(--slow); background: var(--slow-bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .jump-in { position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; }
+
+  /* ---------- 泳道 ---------- */
+  .lane { position: relative; border: 1.2px solid; border-radius: 8px; padding: 30px 16px 18px; margin-bottom: 16px; }
+  .lane-title { position: absolute; top: 8px; right: 14px; font-size: 12.5px; font-weight: 700; }
+  .lane-fast { background: var(--fast-bg); border-color: var(--fast); }
+  .lane-fast > .lane-title { color: var(--fast); }
+  .lane-slow { background: var(--slow-bg); border-color: var(--slow); }
+  .lane-slow > .lane-title { color: var(--slow); }
+</style>
+</head>
+<body>
+
+<h1>SLUB 释放路径（Linux v6.6）</h1>
+<p class="sub">kmem_cache_free → do_slab_free → __slab_free · mm/slub.c · [ ] 内为 /proc/slabinfo 统计项</p>
+
+<div class="page">
+  <div class="diagram">
+
+    <div class="start">kmem_cache_free(s, x)</div>
+    <div class="vconn"></div>
+    <div class="action">virt_to_slab(x)：对象地址 → 页<br>→ struct slab（反查归属）</div>
+    <div class="vconn"></div>
+
+    <!-- ===== 快路径 ===== -->
+    <section class="lane lane-fast">
+      <div class="lane-title">快路径 do_slab_free（无锁，cmpxchg + tid）</div>
+      <div class="row">
+        <div class="decision"><div>所属 slab == c-&gt;slab？</div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">是</span></div>
+          <div class="term t-fast">
+            set_freepointer 接链 → this_cpu_cmpxchg push 到 c-&gt;freelist 头部
+            <div class="stat">统计：FREE_FASTPATH —— 绝大多数释放在此结束</div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div class="vconn"><span class="lbl">否</span></div>
+
+    <!-- ===== 慢路径 ===== -->
+    <section class="lane lane-slow">
+      <div class="lane-title">慢路径 __slab_free（对象不属于本 CPU 活跃 slab）</div>
+
+      <div class="action" style="border-color: var(--slow)">
+        对象（串）挂到 slab-&gt;freelist 头部，inuse -= cnt<br>
+        <span class="dim">（slab 级双字 cmpxchg，失败重试）</span>
+      </div>
+      <div class="vconn"></div>
+
+      <div class="row">
+        <div class="decision"><div>was_frozen？<span class="dim">（是别的 CPU 的活跃 slab）</span></div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">是</span></div>
+          <div class="term t-slow">
+            挂完即结束：活跃 slab 的远程释放<br>等该 CPU 下次 get_freelist 收编
+            <div class="stat">统计：FREE_FROZEN</div>
+          </div>
+        </div>
+      </div>
+      <div class="vconn"><span class="lbl">否</span></div>
+
+      <div class="row">
+        <div class="decision"><div>prior == NULL？<span class="dim">（释放前 slab 全满、不在任何链表）</span></div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">否</span></div>
+          <div class="jump">E</div>
+        </div>
+      </div>
+      <div class="vconn"><span class="lbl">是</span></div>
+
+      <div class="row">
+        <div class="decision"><div>配置了 cpu partial？</div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">是</span></div>
+          <div class="term t-slow">
+            标记 frozen=1 → put_cpu_partial<br>挂到本 CPU 的 cpu partial
+            <div class="stat">统计：CPU_PARTIAL_FREE（超上限批量退回 node partial）</div>
+          </div>
+        </div>
+      </div>
+      <div class="vconn"><span class="lbl">否</span></div>
+      <div class="term t-slow spine">
+        持 list_lock → add_partial 挂 node partial
+        <div class="stat">统计：FREE_ADD_PARTIAL</div>
+      </div>
+
+      <div style="height:18px"></div>
+      <div class="row">
+        <div class="jump-in" style="left:298px">
+          <div class="jump">E</div>
+          <div class="harrow"></div>
+        </div>
+        <div class="decision"><div>new.inuse == 0？<span class="dim">（这次释放让 slab 全空）</span></div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">否</span></div>
+          <div class="term t-slow">
+            slab 已在 node partial 上，无链表操作<br>对象挂上即完成（常见的远程释放）
+          </div>
+        </div>
+      </div>
+      <div class="vconn"><span class="lbl">是</span></div>
+
+      <div class="row">
+        <div class="decision"><div>nr_partial ≥ min_partial？</div></div>
+        <div class="rib">
+          <div class="harrow"><span class="lbl">是</span></div>
+          <div class="term t-buddy">
+            remove_partial 从 partial 摘下<br>discard_slab 还给 buddy
+            <div class="stat">统计：FREE_REMOVE_PARTIAL + FREE_SLAB</div>
+          </div>
+        </div>
+      </div>
+      <div class="vconn"><span class="lbl">否</span></div>
+      <div class="term t-keep spine">
+        留在 node partial
+        <div class="stat">（保住 min_partial 存量）</div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ===== 侧栏 ===== -->
+  <aside class="panel">
+    <h3>附 1：与分配路径的对称</h3>
+    <ul>
+      <li>快路径：alloc pop ↔ free push c-&gt;freelist（同一 cmpxchg 原语）</li>
+      <li>get_freelist 收编 slab-&gt;freelist ↔ 远程释放 push slab-&gt;freelist</li>
+      <li>cpu partial：入口 = CPU_PARTIAL_FREE（本图）↔ 出口 = CPU_PARTIAL_ALLOC（分配图）</li>
+    </ul>
+    <hr>
+    <h3>附 2：边角情况</h3>
+    <ul>
+      <li>一串释放把满 slab 直接放空：配置 cpu partial 时同样挂到释放者 cpu partial；未配置且 nr_partial ≥ min_partial 时直接还 buddy</li>
+    </ul>
+    <hr>
+    <h3>图例</h3>
+    <ul style="list-style:none; padding-left:2px">
+      <li><span class="chip" style="background:var(--fast-bg); border-color:var(--fast)"></span>快路径 do_slab_free</li>
+      <li><span class="chip" style="background:var(--slow-term); border-color:var(--slow)"></span>慢路径处理结果</li>
+      <li><span class="chip" style="background:var(--buddy-term); border-color:var(--buddy)"></span>还给 buddy</li>
+      <li><span class="chip" style="background:var(--keep-term); border-color:var(--keep)"></span>保留在 partial</li>
+    </ul>
+    <p class="note">圆圈 E = 转接符号：进圈 = 跳离此处；出圈 = 跳转到此<br>[ ] 内为 /proc/slabinfo 统计项</p>
+  </aside>
+</div>
+
+</body>
+</html>

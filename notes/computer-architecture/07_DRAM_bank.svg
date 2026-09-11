@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="700" viewBox="0 0 640 700" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <rect width="640" height="700" fill="#ffffff"/>
+
+  <text x="320" y="52" font-size="30" font-weight="bold" text-anchor="middle" fill="#111">DRAM Bank</text>
+
+  <!-- Row Address input -->
+  <text x="30" y="230" font-size="17" fill="#111">Row Address</text>
+  <line x1="152" y1="224" x2="196" y2="224" stroke="#333" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row Decoder -->
+  <rect x="200" y="120" width="80" height="210" fill="#ffffff" stroke="#111" stroke-width="2"/>
+  <text x="240" y="225" font-size="18" fill="#111" text-anchor="middle" transform="rotate(-90 240 225)">Row Decoder</text>
+
+  <!-- DRAM Array -->
+  <rect x="310" y="120" width="240" height="210" fill="#ffffff" stroke="#111" stroke-width="2"/>
+  <text x="430" y="231" font-size="19" fill="#111" text-anchor="middle">DRAM Array</text>
+
+  <!-- decoder to array arrows -->
+  <g stroke="#333" stroke-width="1.6">
+    <line x1="282" y1="135" x2="306" y2="135" marker-end="url(#arrow)"/>
+    <line x1="282" y1="160" x2="306" y2="160" marker-end="url(#arrow)"/>
+    <line x1="282" y1="185" x2="306" y2="185" marker-end="url(#arrow)"/>
+    <line x1="282" y1="210" x2="306" y2="210" marker-end="url(#arrow)"/>
+    <line x1="282" y1="235" x2="306" y2="235" marker-end="url(#arrow)"/>
+    <line x1="282" y1="260" x2="306" y2="260" marker-end="url(#arrow)"/>
+    <line x1="282" y1="285" x2="306" y2="285" marker-end="url(#arrow)"/>
+    <line x1="282" y1="310" x2="306" y2="310" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- array to sense amps arrows -->
+  <g stroke="#333" stroke-width="1.6">
+    <line x1="325" y1="332" x2="325" y2="376" marker-end="url(#arrow)"/>
+    <line x1="355" y1="332" x2="355" y2="376" marker-end="url(#arrow)"/>
+    <line x1="385" y1="332" x2="385" y2="376" marker-end="url(#arrow)"/>
+    <line x1="415" y1="332" x2="415" y2="376" marker-end="url(#arrow)"/>
+    <line x1="445" y1="332" x2="445" y2="376" marker-end="url(#arrow)"/>
+    <line x1="475" y1="332" x2="475" y2="376" marker-end="url(#arrow)"/>
+    <line x1="505" y1="332" x2="505" y2="376" marker-end="url(#arrow)"/>
+    <line x1="535" y1="332" x2="535" y2="376" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Sense Amps -->
+  <rect x="310" y="380" width="240" height="50" fill="#ffffff" stroke="#111" stroke-width="2"/>
+  <text x="430" y="410" font-size="18" fill="#111" text-anchor="middle">Sense Amps</text>
+
+  <!-- sense amps to column latches arrows -->
+  <g stroke="#333" stroke-width="1.6">
+    <line x1="325" y1="432" x2="325" y2="476" marker-end="url(#arrow)"/>
+    <line x1="355" y1="432" x2="355" y2="476" marker-end="url(#arrow)"/>
+    <line x1="385" y1="432" x2="385" y2="476" marker-end="url(#arrow)"/>
+    <line x1="415" y1="432" x2="415" y2="476" marker-end="url(#arrow)"/>
+    <line x1="445" y1="432" x2="445" y2="476" marker-end="url(#arrow)"/>
+    <line x1="475" y1="432" x2="475" y2="476" marker-end="url(#arrow)"/>
+    <line x1="505" y1="432" x2="505" y2="476" marker-end="url(#arrow)"/>
+    <line x1="535" y1="432" x2="535" y2="476" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Column Latches -->
+  <rect x="310" y="480" width="240" height="50" fill="#ffffff" stroke="#111" stroke-width="2"/>
+  <text x="430" y="510" font-size="18" fill="#111" text-anchor="middle">Column Latches</text>
+
+  <!-- latches to mux arrows -->
+  <g stroke="#333" stroke-width="1.6">
+    <line x1="330" y1="532" x2="330" y2="576" marker-end="url(#arrow)"/>
+    <line x1="360" y1="532" x2="360" y2="576" marker-end="url(#arrow)"/>
+    <line x1="390" y1="532" x2="390" y2="576" marker-end="url(#arrow)"/>
+    <line x1="420" y1="532" x2="420" y2="576" marker-end="url(#arrow)"/>
+    <line x1="450" y1="532" x2="450" y2="576" marker-end="url(#arrow)"/>
+    <line x1="480" y1="532" x2="480" y2="576" marker-end="url(#arrow)"/>
+    <line x1="510" y1="532" x2="510" y2="576" marker-end="url(#arrow)"/>
+    <line x1="535" y1="532" x2="535" y2="576" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Column Address input -->
+  <text x="30" y="610" font-size="17" fill="#111">Column Address</text>
+  <line x1="172" y1="604" x2="348" y2="604" stroke="#333" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Mux (trapezoid, wide top narrow bottom) -->
+  <polygon points="320,580 540,580 460,632 400,632" fill="#ffffff" stroke="#111" stroke-width="2"/>
+  <text x="430" y="612" font-size="18" fill="#111" text-anchor="middle">Mux</text>
+
+  <!-- data out arrows -->
+  <g stroke="#333" stroke-width="1.6">
+    <line x1="410" y1="634" x2="410" y2="664" marker-end="url(#arrow)"/>
+    <line x1="430" y1="634" x2="430" y2="664" marker-end="url(#arrow)"/>
+    <line x1="450" y1="634" x2="450" y2="664" marker-end="url(#arrow)"/>
+  </g>
+  <text x="430" y="690" font-size="17" fill="#111" text-anchor="middle">Data</text>
+</svg>
