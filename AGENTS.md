@@ -78,7 +78,7 @@ This repository is a personal technical archive. It contains long-lived notes, d
 | `notes/linux-kernel/os-boot/` | Boot and reboot flows. |
 | `notes/linux-kernel/gpu/` | GPU-related notes, currently AMD-focused. |
 | `notes/linux-kernel/general/` | Temporary or general kernel notes. Clean up or promote durable material when it becomes stable. |
-| `notes/ai_infra/` | AI infrastructure notes: `ascendc/`, `pytorch/`, `transformer/`, `vllm/`. |
+| `notes/ai-infra/` | AI infrastructure notes: `ascendc/`, `pytorch/`, `transformer/`, `vllm/`. |
 | `notes/computer-architecture/` | Computer architecture study notes. |
 | `notes/known-concepts.md` | Index of concepts already understood by the user. Check this before writing explanations. |
 
@@ -112,11 +112,11 @@ When explaining complex technical concepts (kernel subsystems, allocator design,
 - **Don't tell, let them experience — with brakes.** When expanding, prefer leading with the question that opens onto the mechanism and let the user think first. But tell directly when: (a) the user asks you to just explain; (b) they have been stuck on the same point long enough that more struggle adds nothing; (c) what is missing is an underivable fact (a definition, an API, a hardware behavior) — hand over the fact, no suspense.
 - **Code walkthroughs:** before reading through a function or flow, state What it does (its role in the bigger picture, inputs/outputs, responsibility boundary) and Why it exists / why it is shaped that way (which design decision it embodies); only then walk the How. Never open a walkthrough with line-by-line code.
 - **No real-world metaphors.** Use direct technical language. Precise correspondences to concepts the user already knows (e.g. "SLUB's cpu_slab plays the same role as buddy's PCP") are encouraged. Do not invent casual translations for technical terms — use the original term (e.g. `seal`, `F_SEAL_WRITE`) and state plainly what the mechanism does.
-- The user is transitioning to AI infrastructure work. When a topic has GPU / AI-Infra relevance (training, inference, NCCL, CUDA, PyTorch, /dev/shm, pinned memory, etc.), explicitly call out those connections. `notes/mm/overview.md` tags such modules with `gpu`.
+- The user is transitioning to AI infrastructure work. When a topic has GPU / AI-Infra relevance (training, inference, NCCL, CUDA, PyTorch, /dev/shm, pinned memory, etc.), explicitly call out those connections. `notes/linux-kernel/mm/overview.md` tags such modules with `gpu`.
 
 ## SVG Diagram Conventions
 
-When hand-writing SVG diagrams (examples: `notes/mm/slub/slub-overview.svg`, `notes/mm/slub/slub-alloc-path.svg`):
+When hand-writing SVG diagrams (examples: `notes/linux-kernel/mm/slub/slub-overview.svg`, `notes/linux-kernel/mm/slub/slub-alloc-path.svg`):
 
 - **Jumps use connector circles, never long arrows.** For goto-like flow: at the jump-away point, draw the arrow INTO a named circle; at the arrival point, place a same-named circle beside the flow with only an outgoing arrow merging into it. State the convention in a legend ("arrow into circle = jump away; arrow out of circle = arrive here").
 - **Keep elements off container borders.** Boxes must not touch or coincide with lane/group rectangle edges — leave ~20px margin.

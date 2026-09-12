@@ -49,7 +49,7 @@
 ### 略看
 
 - Ch19 计算思维 — 全书方法论总结，读完 Ch16 后快读串珠子
-- Ch22 进阶实践 — 统一内存/zero-copy/大地址空间，衔接 GPU 内核侧兴趣（`notes/gpu/`），翻一遍建立印象即可
+- Ch22 进阶实践 — 统一内存/zero-copy/大地址空间，衔接 GPU 内核侧兴趣（`notes/linux-kernel/gpu/`），翻一遍建立印象即可
 
 ### 跳过，按需回补
 
@@ -78,8 +78,8 @@ Ch8 stencil（模式与 Ch7 重复）、Ch15 graph、Ch17 MRI、Ch18 静电势�
 
 ## 与已有知识的衔接
 
-- `notes/mm/`：页表/fault、buddy、SLUB、shmem（/dev/shm 跨进程共享是 DataLoader/NCCL SHM 的基础）。MM 回收链（rmap/LRU/swap）暂停，遇到 GPU 统一内存、 pinned memory、容器 OOM 再补。
-- `notes/gpu/`：AMD 侧已有笔记（amdkfd、GPU 虚拟地址空间等）。
+- `notes/linux-kernel/mm/`：页表/fault、buddy、SLUB、shmem（/dev/shm 跨进程共享是 DataLoader/NCCL SHM 的基础）。MM 回收链（rmap/LRU/swap）暂停，遇到 GPU 统一内存、 pinned memory、容器 OOM 再补。
+- `notes/linux-kernel/gpu/`：AMD 侧已有笔记（amdkfd、GPU 虚拟地址空间等）。
 
 ## 后续候选方向（主线完成后评估）
 
