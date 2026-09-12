@@ -2,7 +2,7 @@
 
 > 目标：不钻代码，先把 vLLM 的概念地基打牢，能独立讲清 v1 架构各组件的职责边界与交互方式，再回到代码验证。
 >
-> 触发点：手绘 vLLM v1 架构图（`notes/ai_infra/vllm.excalidraw`）时发现对 KV Cache 的管理分层理解含糊——谁是簿记、谁是数据面。
+> 触发点：手绘 vLLM v1 架构图（`notes/ai-infra/vllm/vllm.excalidraw`）时发现对 KV Cache 的管理分层理解含糊——谁是簿记、谁是数据面。
 
 ## 核心主线：三层问题
 
@@ -19,7 +19,7 @@ vLLM 整体可以拆成三层，每层看住一个问题，串起来就通了：
 - **KVCacheManager 只做簿记，不碰数据**：它管理空闲 block 队列、token → 物理 block 的 block table、prefix cache 命中，自始至终只操作 block id。
 - **数据面完全在 Worker 本地**：真正的 KV cache tensor 在 Worker 初始化时按显存预算（`gpu_memory_utilization`）一次性静态分配，形状 `[num_blocks, block_size, num_kv_heads, head_size]`，初始内容是未初始化的垃圾值。
 - **跨进程只传轻量元数据**：Scheduler 每步产出 `SchedulerOutput`（带分配好的 block id），GPUModelRunner 拿 block id 在本地显存读写。这就是调度和计算能分进程跑的原因。
-- **与 MM 的直接类比**（`notes/mm/` 知识可迁移）：PagedAttention 把 KV cache 切固定大小 block = 分页；block table = 页表；动机也一致——动态增长的需求 vs 必须预分配的物理资源。
+- **与 MM 的直接类比**（`notes/linux-kernel/mm/` 知识可迁移）：PagedAttention 把 KV cache 切固定大小 block = 分页；block table = 页表；动机也一致——动态增长的需求 vs 必须预分配的物理资源。
 
 ## 学习顺序与资源（英文）
 

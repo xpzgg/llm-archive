@@ -118,6 +118,6 @@ VMA（虚拟）  ──── page fault ────▶  folio（物理）
 
 **当前进度：** page-fault、buddy、SLUB、shmem 已完成（见 [slub/slub.md](slub/slub.md)、[shmem/shmem.md](shmem/shmem.md)）。
 
-**状态：MM 主线暂停（2026-07）。** 主干（分配：page-fault/buddy/SLUB；文件侧交汇：shmem）已学完，剩余主题（下方回收链 #8-11、page cache #12、大页 #13-14、mmap 接口 #15）全部转为**按需学习**——遇到具体问题再回来补，不再按顺序推进。当前学习重心转入 GPU/CUDA（PMPP 教材），学习计划见 [../ai-infra/overview.md](../ai-infra/overview.md)。
+**状态：MM 主线暂停（2026-07）。** 主干（分配：page-fault/buddy/SLUB；文件侧交汇：shmem）已学完，剩余主题（下方回收链 #8-11、page cache #12、大页 #13-14、mmap 接口 #15）全部转为**按需学习**——遇到具体问题再回来补，不再按顺序推进。当前学习重心转入 GPU/CUDA（PMPP 教材），学习计划见 [../../ai-infra/overview.md](../../ai-infra/overview.md)。
 
 **若恢复 MM 学习，推荐入口：** 回收链 rmap → LRU/vmscan → swap（#8-10），它与已学的 shmem 换出路径直接衔接；page cache（#12）可穿插。
