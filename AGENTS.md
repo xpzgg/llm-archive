@@ -1,5 +1,3 @@
-# Repository Guide
-
 Optimize for how easily I can understand and use the answer.
 Treat my attention as scarce. Reason as thoroughly as the task requires;
 present only the result and the support I need.
@@ -49,6 +47,8 @@ Example of depth:
 “Why can it return stale data?” → Explain how the copy falls behind the source.
 “How should I fix that here?” → Give the relevant implementation and tradeoff.
 
+# Repository Guide
+
 This repository is a personal technical archive. It contains long-lived notes, downstream-facing troubleshooting docs, generated analysis results, scripts, and local agent/tooling configuration.
 
 ## Directory Layout
@@ -59,10 +59,10 @@ This repository is a personal technical archive. It contains long-lived notes, d
 | `docs/` | Troubleshooting guides for downstream users. These should be operational: explain the mechanism, provide a decision map, and include concrete commands. See `docs/CLAUDE.md` for the expected structure. |
 | `results/` | Output from focused investigations, reports, mind maps, and generated summaries. Use this for one-off or deliverable-style artifacts that are not yet canonical notes. |
 | `scripts/` | Small helper scripts and sample logs used to parse, analyze, or demonstrate technical traces. Keep scripts narrow and document their expected input if non-obvious. |
-| `logs/` | Raw or semi-raw logs kept as investigation material. Avoid mixing interpreted conclusions here; put conclusions in `notes/`, `docs/`, or `results/`. |
 | `patch/` | Patch files or kernel change snippets preserved for reference. |
 | `prompts/` | Reusable prompts and prompt fragments. |
 | `neovim/` | Neovim configuration and related notes. Treat this as a separate config area, not part of the kernel notes. |
+| `skills/` | Reusable agent skills kept with the archive (e.g. `write-kernel-bug-report`). |
 | `.claude/`, `.codex/`, `.agents/` | Local agent configuration and skills. Do not treat these as user-facing documentation. |
 
 ## Notes Subtree
@@ -71,23 +71,24 @@ This repository is a personal technical archive. It contains long-lived notes, d
 
 | Path | Topic |
 |---|---|
-| `notes/rcu/` | RCU internals: overview, QS reporting, trace events, API use, `rcu_sync`, and subsystem breakdowns. |
-| `notes/mm/` | Memory-management topics such as boot memory init, OOM, IOMMU, Maple Tree, and page-fault diagrams. |
-| `notes/interrupt/` | Interrupt architecture and ARM-specific interrupt/SDEI material. |
-| `notes/os-boot/` | Boot and reboot flows. |
+| `notes/linux-kernel/` | Linux kernel notes, split by subsystem: `rcu/`, `mm/`, `interrupt/`, `os-boot/`, `gpu/`, `general/`. |
+| `notes/linux-kernel/rcu/` | RCU internals: overview, QS reporting, trace events, API use, `rcu_sync`, and subsystem breakdowns. |
+| `notes/linux-kernel/mm/` | Memory-management topics such as boot memory init, OOM, IOMMU, Maple Tree, and page-fault diagrams. |
+| `notes/linux-kernel/interrupt/` | Interrupt architecture and ARM-specific interrupt/SDEI material. |
+| `notes/linux-kernel/os-boot/` | Boot and reboot flows. |
+| `notes/linux-kernel/gpu/` | GPU-related notes, currently AMD-focused. |
+| `notes/linux-kernel/general/` | Temporary or general kernel notes. Clean up or promote durable material when it becomes stable. |
+| `notes/ai_infra/` | AI infrastructure notes: `ascendc/`, `pytorch/`, `transformer/`, `vllm/`. |
 | `notes/computer-architecture/` | Computer architecture study notes. |
-| `notes/gpu/` | GPU-related notes, currently AMD-focused. |
-| `notes/general/` | Temporary or general notes. Clean up or promote durable material when it becomes stable. |
 | `notes/known-concepts.md` | Index of concepts already understood by the user. Check this before writing explanations. |
 
 When editing `notes/`, follow the local rule: explain What, Why, How, and So What as needed, but do not force every article into a rigid template.
 
 ## Where New Work Goes
 
-- Put durable technical understanding in `notes/<topic>/`.
+- Put durable technical understanding in `notes/<topic>/` (kernel topics under `notes/linux-kernel/<subsystem>/`).
 - Put downstream runbooks or issue triage guides in `docs/`.
 - Put investigation output, CVE writeups, diagrams, and generated reports in `results/`.
-- Put raw captured data in `logs/`.
 - Put reusable parsing or analysis helpers in `scripts/`.
 - Put patches in `patch/`.
 
