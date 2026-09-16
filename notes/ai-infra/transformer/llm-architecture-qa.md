@@ -1,8 +1,8 @@
-# Illustrated Transformer 复习问答笔记
+# 从 Transformer 到现代 LLM 架构 复习问答笔记
 
-> 来源：2026-09 读 Illustrated Transformer 期间的提问记录。
+> 来源：2026-09 读 Illustrated Transformer、DeepSeek-V3.2 报告、准备 GLM-5.2 DSA_CP 设计期间的提问记录。
 > 收录标准：当时理解有偏差、经讨论纠正的关键概念。按主题归类，每条记"误区 → 正解"。
-> 相关：[阅读计划](../vllm/reading-plan.md)。
+> 相关：[阅读计划](../vllm/reading-plan.md)、[vLLM 学习路线](../vllm/vllm-learning-roadmap.md)。
 
 ## 一、attention 与 FFN 的本质分工
 
@@ -53,9 +53,9 @@ token 数不变，变的只是内容。这是推理框架以 token 为单位组�
 正解：标量序号没有可用的几何结构——原始值会淹没 embedding（±1 vs 500），归一化后
 相邻位置又无法区分。sin/cos 相当于对序号做傅里叶展开。
 
-**与 max_seq_len 的关系**：PE 表一行一个位置，表长 = max_seq_len，超出的 token 没有
-编码可用——这是"上限被物理写死"的原因。现代 RoPE 改为按位置对 q/k 现场旋转，硬上限
-消失，约束退到 KV cache 预算与训练长度外推。
+**与 max_seq_len 的关系**：vanilla PE 表一行一个位置，表长 = max_seq_len，超出的 token
+没有编码可用——"上限被物理写死"。现代 RoPE 无表，上限的性质完全不同，
+见"十三、上下文长度上限"。
 
 ## 四、batch 与训练
 
@@ -133,7 +133,118 @@ epoch = 过一遍数据集；step = 一（mini-）batch 更新一次；micro-bat
 **decoder-only 的 KV cache**：每层 self-attention 的 K、V，每个历史 token 一份，
 每层各存一份（不是最后一层，也不是 encoder 的）。prefill 写全量，decode 每步追加一格。
 
-## 八、推理与精度测试
+## 八、MLA（Multi-head Latent Attention）
+
+**误区：MLA 是在 MHA 里给 K、V 各加一个压缩矩阵。**
+正解：K 和 V 是**联合压缩**——hidden state 压成一个共享 latent 向量 `c_t`（512 维）+ 一个很小的
+decoupled RoPE key（位置信息压不进 latent，单独存）；cache 里每 token 每层就这两样。
+使用时每个 head 有自己的上投影矩阵，从 `c_t` 各自重建出不同的 K/V——这是和 MQA
+（全头共享同一份 K/V）的本质区别，也是质量不掉的原因。
+
+**误区：推理时真的把 K/V 升维展开来算。**
+正解：工程上用**权重吸收**——上投影矩阵预先合并进 query 投影和 output 投影，decode 直接拿
+query 对 cache 里的 latent 算注意力，全程不展开完整 K/V。这就是论文附录说的 "MQA mode"。
+对 CP 的意义：切分时面对的 KV 条目就是这个 latent（512+64 维，全头共享），不是 per-head K/V。
+
+**误区：MQA 共享 KV，说明各 head 有同样的 W_K/W_V，那还要 multi head 干什么。**
+正解：共享的只有 W_K/W_V（库存只有一份），每个 head 保留独立的 W_Q（各自提不同的问题）。
+多样性在 query 侧：同一份 K/V 上，不同 query 算出不同注意力分布。质疑方向是对的——
+单份 KV 编码确实损失表达力，实测 MQA 质量略降。谱系：MHA（K/V 每头一份）→ GQA（分组共享）
+→ MQA（全局一份）→ MLA（不共享，压缩重建，cache 接近 MQA、质量接近 MHA）。
+
+**误区：MQA 没有 multi head，只有一层 head。**
+正解：Q 侧仍是多头（如 128 个），只有 K/V head = 1。名字即含义：Multi-**Query**。
+KV cache 大小正比于 K/V head 数，Q 用完即弃不进 cache。
+
+## 九、DSA（DeepSeek Sparse Attention）
+
+**主干**：lightning indexer（小头数、FP8、ReLU）给每个 query 对全部历史 token 打分
+（O(L²) 但常数极小）→ top-k 选择（k=2048）→ 主 MLA attention 只算选中条目（O(L²)→O(Lk)）。
+indexer 训练：KL 散度蒸馏主 attention 分布，梯度 detach，与主模型分开优化。
+
+**误区：选出的不重要 token 用 mask 掩盖掉。**
+正解：是 **select/gather 不是 mask**。mask 是"全算一遍再置零"，计算和读取一点没省；
+DSA 是只 gather 2048 条出来算，其余根本不读。省的是计算量和读取带宽。
+（论文里的 "masked MHA mode" 只是短序列 prefill 时模拟 DSA 行为的工程技巧。）
+
+**误区：DSA 节省了 KV cache。**
+正解：**存储量不变**——任何历史 token 都可能被未来 query 选中，全量 latent KV 必须保留。
+省的是**每步读取**：100K 上下文 MLA 后总 cache ~7GB（不变），decode 每步读取 7GB → ~140MB。
+对 DSA_CP 的直接约束：全量 cache 必须保留且任意条目可能被选中 → "按 token 切 KV" 会导致
+跨卡 gather → 这就是选"KV 全量复制、只切 query"方案的算法层理由。
+
+**误区：DSA 是 FFN 层的技术。**
+正解：DSA 在 **attention 层**（序列轴稀疏）；FFN 层的稀疏是 MoE。V3.2 相对 V3.1-Terminus
+唯一架构改动就是 attention 换 DSA，FFN 未动。
+
+**indexer 也有自己的 cache**：indexer 的 `k^I` 每 token 每层一份（128 维、FP8），打分要扫全序列，
+所以 CP 下每个 rank 必须能看到全序列的 `k^I`——"KV 全量复制"的另一条理由。
+GLM-5.2 的 **IndexShare**：每 4 个 DSA 层共享一个 indexer（producer 算 top-k，后 3 层复用），
+1M 上下文下 per-token FLOPs 降 2.9×；CP 设计里 producer/consumer 层的索引边界必须对齐同一切分。
+
+**MoE router 与 DSA indexer 的异同**：骨架相同（打分 → top-k），差异在：
+MoE 候选集是**固定** 256 个专家（router 线性层打分，O(256) 小计算）；
+DSA 候选集是**动态增长**的 L 个历史 token（indexer 点积打分，O(L) 且要和 cache 交互）。
+CP 设计围着 DSA 转、不用管 MoE，原因在此。
+
+## 十、KV cache 成本账（以 100K / 1M 上下文为例）
+
+**误区（震撼点）：100K 上下文一个 token 要读 400GB KV cache。**
+正解：400GB 是 **MHA 假设下**的总 cache 量（2×128头×128维×61层×fp16 ≈ 4MB/token × 100K）。
+decode 每生成一个 token 要全读一遍——H800 带宽 3.35TB/s → 上限 ~8 token/s。
+注意力计算本身只要 <1ms，120ms 全在搬数据：**decode attention 是伪装成计算任务的数据搬运任务**。
+
+**三件套各打一段**：
+
+| 问题 | 武器 | 效果（GLM-5.2，1M 上下文） |
+|---|---|---|
+| 存不下 | MLA 压条目大小 | TB 级 → ~90GB（78 层 × 576 维 × 2B ≈ 90KB/token），放得下 |
+| 每步读太多 | DSA 压读取条数 | 90GB → ~180MB（top-2048），读得少 |
+| 单卡放不下 90GB | CP/TP 摊多卡 | 摊得开 |
+| indexer 每层扫全序列还是贵 | IndexShare | 4 层摊一次 |
+
+## 十一、Pre-Norm 与 RMSNorm
+
+**疑问：为什么 DeepSeek 是先 RMSNorm 再 attention/FFN，经典 Transformer 是后 LayerNorm。**
+正解：原版是 Post-LN（6 层没问题）；层数上到几十层后 Post-LN 训不动——残差通路每层
+被 LN 调制，靠近输入层梯度逐层衰减，必须精细 warmup 且易 loss spike。
+**Pre-Norm**（`x = x + F(norm(x))`）让残差流从首层到末层是纯恒等映射，梯度无损直达。
+代价：残差流数值随深度累积、表征约束弱，浅网下 Post-LN 精度略好——但敌不过"深了训不动"。
+**RMSNorm**：砍掉 LN 的均值居中（保留重缩放主效应），计算更省、kernel 好融合，实测无损。
+2023 年后所有主流大模型的共识配置。
+
+## 十二、训练流水线（预训练 / 后训练 / 基座）
+
+**基座（base model）**：预训练完成、后训练之前的 checkpoint。V3 与 R1 同基座：
+架构和预训练权重完全相同，区别只在后训练路线（V3 = SFT+对齐；R1 = 重 RL 激发推理）。
+R1-Zero 证明：只给奖励信号（答案对不对）不给教法，长链推理可以自己涌现。
+
+**疑问：后训练改不改参数？**
+正解：改，全参数梯度更新，机制上和预训练无区别。区别在数据（无标注海量文本 → 带偏好
+的小数据）、目标（知识容量 → 行为塑造）、量级（后训练算力占比 <5%）。
+环节：SFT（指令跟随）→ RL（GRPO，推理强化 + 对齐）→ 蒸馏。
+
+**误区：后训练不会让模型学到新知识。**
+修正：不是"不能"而是"注入效率低、代价大"——知识写入量 ∝ 数据量×算力，后训练数据小
+3-4 个数量级；且小数据猛训有灾难性遗忘。RL 基本不注入（只在已有行为分布里调权）；
+SFT 可注入小剂量领域知识；大剂量注入要回到 continued pre-training（灰色地带，
+如 V3 续训扩 128K、V3.2 装 DSA）。
+定稿表述：**预训练 = 无偏好的知识注入；后训练 = 带偏好的行为塑造**
+（每份数据都在表达"我更希望你输出 A 而不是 B"；RL 是偏好的极端形态——只留奖励信号）。
+
+## 十三、上下文长度上限
+
+**误区：上下文上限 = 位置编码表的 size（max_seq_len 参数）。**
+正解：分两种编码。老式可学习位置 embedding（GPT-2）：确实是 `[max_seq_len, hidden]` 的表，
+超了没向量可查，硬上限。**RoPE：没有表**——旋转角按位置编号现场算，任意大都算得出；
+`max_position_embeddings` 只是"训练担保范围"，超了不是报错而是质量渐烂（没训过的旋转角）。
+YaRN 类扩展：对 RoPE 频率做缩放把更多位置挤进已训范围 + 继续训练（DS 扩 128K、GLM 上 1M 均此路线）。
+
+**生效上限**：`min(max_position_embeddings, 框架的 max_model_len, 商业/API 限制)`。
+物理约束是 KV cache 显存——1M 上下文 ≈ 5MB 文本 ≈ 90GB 显存（MLA 加持下），
+"长上下文即服务"的真实成本结构。
+
+## 十四、推理与精度测试
 
 **贪心解码的可复现性**：数学上确定（每步 argmax 无随机源）；工程上不保证 bit 一致——
 浮点归约顺序随 batch 组成变化，末位抖动可能让分数接近的候选翻面。batch invariance
@@ -147,7 +258,7 @@ DSA_CP 验证策略：先严格档（dsacp 开/关逐 token 对拍），再 benc
 **decode 停止条件**：生成 EOS；命中用户配置的 stop token/字符串；撞长度上限
 （max_tokens 或 max_model_len）；客户端取消。性能测试常用 ignore_eos 固定输出长度。
 
-## 九、与 DSA_CP 的连接点
+## 十五、与 DSA_CP 的连接点
 
 - CP 切的是**实际请求的 token 序列**（packed 布局），与 max_seq_len 上限无关；
 - 长 context 拉高 TTFT 的原因：prefill 要处理全部 prompt token，attention 计算量 ∝ N²；
