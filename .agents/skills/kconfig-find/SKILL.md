@@ -1,5 +1,5 @@
 ---
-name: kconfig_find
+name: kconfig-find
 description: >
   Linux 内核 .o 文件到 Kconfig 的依赖查找助手。当用户询问某个内核模块或目标文件
   （如 nouveau_gem.o、amdgpu.o）由哪个 Kconfig 选项控制编译时触发。也适用于用户
