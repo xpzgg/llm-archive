@@ -21,7 +21,7 @@ RCU grace period 推进依赖两个问题：
 | 调度 tick 兜底 | `update_process_times()` | `rcu_sched_clock_irq()` → `rcu_flavor_sched_clock_irq()` | 所有配置 |
 | CPU offline | hotplug | `rcutree_report_cpu_dead()` → `rcu_report_qs_rnp()` | hotplug |
 | CPU online | hotplug | `rcutree_report_cpu_starting()` → `rcu_report_qs_rnp()` | hotplug |
-| FQS 强制扫描 | GP kthread | `force_qs_rnp()` → `rcu_dynticks_fqs()` | 所有配置 |
+| FQS 强制扫描 | GP kthread | `rcu_gp_fqs()` → `force_qs_rnp(f)` | 所有配置 |
 | GP kthread 自身上报 | GP kthread 启动 GP 时 | `rcu_qs()` + `rcu_report_qs_rdp()` | 所有配置 |
 
 ## 调用链详解
@@ -93,7 +93,7 @@ __schedule()                                  // kernel/sched/core.c:7043
                       │    └─ ct->nmi_nesting = CT_NESTING_IRQ_NONIDLE
 ```
 
-**EQS 上报的本质：** EQS 不是主动调用 `rcu_report_qs_rdp()`，而是通过修改 `ct->state` 的 CT_RCU_WATCHING 位。GP kthread 的 FQS 扫描通过 `rcu_dynticks_fqs()` 远程检测这个计数器的奇偶性来判断 QS。
+**EQS 上报的本质：** EQS 通过更新 `ct->state` 中的 RCU watching 计数发布状态。GP kthread 的 FQS 扫描通过当前是否在 EQS、以及计数相对首次快照是否变化，远程判断 QS。详见 [FQS 机制](rcu_fqs.md)。
 
 ### 3. IRQ / NMI 进入退出
 
@@ -111,7 +111,7 @@ ct_irq_enter()                     ct_irq_exit()
        ├─ already watching:               │         // 恢复 EQS
        │    └─ nmi_nesting += 2           │
        └─ rcu_irq_enter_check_tick()      └─ rcu_task_exit()
-            // 确保 tick 在运行
+            // nohz_full 且 urgent 等条件满足时，恢复 tick
 ```
 
 **nmi_nesting 的含义：**
@@ -122,7 +122,7 @@ ct_irq_enter()                     ct_irq_exit()
 
 ### 4. 调度 Tick 兜底（rcu_sched_clock_irq）
 
-tick 是最后的兜底。即使 context_tracking 关了，tick 还能上报 QS。
+tick 可以检测满足条件的 QS，并推动本地 RCU core 上报。普通 CPU 持续运行用户态且未启用用户态 EQS 跟踪时，通常依赖这条路径；nohz_full 用户态与 idle 则由远端 FQS 检测 EQS 并报告。
 
 ```
 update_process_times(user_tick)              // kernel/time/timer.c:2468
@@ -157,27 +157,23 @@ update_process_times(user_tick)              // kernel/time/timer.c:2468
 **tick 什么时候能直接上报 QS？**
 - `user=1`：从用户态来的 tick，CPU 天然在 QS
 - `rcu_is_cpu_rrupt_from_idle()`：从 idle 来的 tick
-- 非 PREEMPT_RCU：preempt_count 只有 HARDIRQ_OFFSET 时，说明没有 read-side CS
+- 非 PREEMPT_RCU：还要求 CONFIG_PREEMPT_COUNT 启用；preempt_count 只有 HARDIRQ_OFFSET 时可记录 QS
 
-### 5. FQS 强制扫描（Force Quiescent State）
+### 5. FQS 扫描：检测与催促是两件事
 
-GP kthread 等了一段时间还有 CPU 没上报 QS，就主动扫描。
+GP kthread 通常先等待 `jiffies_till_first_fqs`，但各 CPU 可在此之前正常上报，让 GP 提前完成；FQS 请求也可以提前唤醒。首次扫描负责取快照和确认当前 EQS；后续扫描按条件设置 urgent/heavy。后续扫描间隔由 `jiffies_till_next_fqs` 控制。
 
+```text
+rcu_gp_fqs() → force_qs_rnp(f)
+  首次：dyntick_save_progress_counter()       // openEuler 6.6 名称
+    → 保存 dynticks 快照；已在 EQS 则报告 QS
+  后续：rcu_implicit_dynticks_qs()
+    → 相对首次快照经过 EQS，则报告 QS
+    → 否则按 GP 年龄等条件设置 urgent/heavy
+    → 满足独立的重调度条件才请求 resched_cpu()
 ```
-rcu_gp_fqs_loop()                             // kernel/rcu/tree.c
-  └─ force_qs_rnp(f)                           // kernel/rcu/tree.c:2732
-       │
-       └─ 对每个 leaf rnp:
-            └─ 对 qsmask 中每个还没上报的 CPU:
-                 └─ f(rdp)                     // f = rcu_dynticks_fqs
-                      │
-                      └─ rcu_dynticks_fqs(rdp) // 检查 dynticks 计数器
-                           │
-                           └─ 比较当前 ct_rcu_watching_cpu() 与 GP 开始时记录的值
-                                ├─ 变化了 → 该 CPU 经历过 EQS → 报告 QS
-                                │    └─ rcu_report_qs_rnp()
-                                └─ 没变化 → resched_cpu()  // 抖一下这个 CPU
-```
+
+较新代码对应函数名为 `rcu_watching_snap_save()` / `rcu_watching_snap_recheck()`。首次 FQS 保存快照，后续 FQS 比较计数，并在满足重调度条件时请求 IPI 通知。扫描周期、催促阈值与 nohz_full 特殊条件见 [FQS 笔记](rcu_fqs.md)。
 
 ### 6. CPU Hotplug
 
@@ -213,8 +209,8 @@ rcu_qs()                          // 标记 cpu_no_qs.b.norm = false
             → ... 直到 root rnp
               → 唤醒 GP kthread 完成 GP
 
-// EQS 路径特殊：不经过 rcu_report_qs_rdp()，
-// 而是 GP kthread 通过 FQS 扫描 rcu_dynticks_fqs() 远程检测
+// EQS 路径：GP kthread 通过 FQS 扫描 dynticks/watching 快照，
+// 远程确认 QS 后调用 rcu_report_qs_rnp()
 ```
 
 ## 关键数据结构
@@ -340,17 +336,11 @@ rcu_dump_cpu_stacks(gp_seq)                    // tree_stall.h:396
 | GP kthread 饿死 | 优先级太低 / 被绑定 CPU | `rcu_check_gp_kthread_starvation` |
 | CPU offline 但没清理 | hotplug 竞争 | 看 `rcutree_report_cpu_dead` 是否被调用 |
 
-## CONFIG 依赖关系
+## 配置与运行时 CPU 范围
 
-```
-CONFIG_NO_HZ_FULL
-  → 强制开启 CONFIG_CONTEXT_TRACKING
-    → 强制开启 CONFIG_CONTEXT_TRACKING_USER
-      → 强制开启 CONFIG_CONTEXT_TRACKING_IDLE
+`CONFIG_NO_HZ_FULL=y` 表示内核支持 full dynticks；实际 CPU 是否采用该模式，还要看运行时 `tick_nohz_full_mask`。用户态 EQS 跟踪通常在该 mask 中启用，`CONFIG_CONTEXT_TRACKING_USER_FORCE` 等配置可改变范围。
 
-非 nohz_full 配置下 context_tracking 可以不开，
-RCU 退回到依赖 tick 上报 QS 的模式。
-```
+非 nohz_full CPU 也可以通过 idle EQS 被远端确认 QS，并通过调度路径记录 QS。各路径分别通过 tick、调度或远端检测推进 QS 上报。具体场景对比见 [FQS 笔记](rcu_fqs.md)。
 
 ## 关键文件索引
 
