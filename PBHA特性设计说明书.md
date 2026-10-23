@@ -239,16 +239,65 @@ flowchart TD
 
 ### 5.1 策略粒度与接口
 
-控制对象是 `mm_struct` 或 VMA。多个线程共享同一 mm 时，进程级更新影响整个共享地址空间，不能提供线程私有的页表策略。
+运行时用户控制分为两类：**进程级的 procfs、prctl**，以及**地址范围级的 mmap、mprotect**。此外，启动参数负责功能使能和内核映射策略，内核辅助函数供驱动构造映射属性。
 
-| 接口 | 粒度 | 契约与基线边界 |
-| --- | --- | --- |
-| `pbha=user/enable` | 系统启动级 | 选择允许的策略范围，启动后保持稳定 |
-| `mmap(..., prot \| PROT_PBHA_BIT0, ...)` | 新映射 | 请求给新 VMA 设置 bit0；需特性已启用 |
-| `mprotect(..., PROT_PBHA_BIT0 ...)` | 既有地址范围 | 存在参数识别和 VMA 转换入口，但基线不具备完整切换闭环，不能作为已验收接口承诺 |
-| `/proc/<pid>/pbha_bit0` | 目标 mm | 写入 `0/1` 清除或设置进程级策略；读取返回 mm 默认值 |
-| `prctl(PR_UPDATE_PBHA_BIT0, val, 0, 0, 0)` | 当前 mm | `val` 仅允许 `0/1`，复用进程级更新逻辑 |
-| `pgprot_pbha(prot, value)` | 驱动所创建映射 | 请求白名单内的完整 PBHA 值；驱动从平台描述获知值的含义 |
+进程级接口操作的是 `mm_struct`。多个线程共享同一 mm 时，修改影响整个共享地址空间，不是某个线程的私有策略。地址范围级接口只影响当前地址空间中的指定范围，不修改进程默认值。
+
+#### 5.1.1 入口总览
+
+| 类别 | 入口及调用方式 | 控制对象 | 设计行为 |
+| --- | --- | --- | --- |
+| 进程级：外部指定目标 | 向 `/proc/<pid>/pbha_bit0` 写入 `0` 或 `1` | 指定任务的 mm，受访问权限及任务检查约束 | 更新默认策略、已有 VMA 和受支持的已有页表 |
+| 进程级：应用自控制 | `prctl(PR_UPDATE_PBHA_BIT0, val, 0, 0, 0)` | 调用者当前 mm | 与 procfs 汇聚到同一个更新函数，`val` 为 `0/1` |
+| 地址范围级：新建 | `mmap(..., prot \| PROT_PBHA_BIT0, ...)` | 新建 VMA | 显式设置属性，并合入 mm 默认标志；后续建表使用该策略 |
+| 地址范围级：修改 | `mprotect(addr, len, prot)` | 当前 mm 的指定已有地址范围 | 按本次 `prot` 设置或清除 PBHA，并同步已有映射；这是第 5.8 节的目标语义，基线尚有缺口 |
+| 系统启动级 | `pbha=user` / `pbha=enable` | 功能开关和内核映射策略 | 前者开放用户控制，后者同时对已接入内核建表路径启用 bit0 策略；不等于所有用户页自动置位 |
+| 内核映射辅助接口 | `pgprot_pbha(prot, value)` | 驱动等内核代码构造的映射属性 | 生成允许值范围内的 PBHA 属性，调用者负责把它用于具体建表；不是用户态系统调用 |
+
+```mermaid
+flowchart TD
+    BOOT[启动参数 pbha=user 或 enable] --> ENABLE[Feature 使能及策略开关]
+    ENABLE -.-> USER[开放用户 PBHA 控制]
+    USER --> PROC[写 proc pid pbha_bit0]
+    USER --> PRCTL[prctl PR_UPDATE_PBHA_BIT0]
+    PROC --> WRITE[pbha_bit0_write 获取目标 mm]
+    PRCTL --> CURRENT[校验参数 使用 current mm]
+    WRITE --> UPDATE[pbha_bit0_update_vma]
+    CURRENT --> UPDATE
+    UPDATE --> ALL[默认策略 加已有 VMA 加已有页表]
+    USER --> MMAP[mmap 的 PROT_PBHA_BIT0]
+    MMAP --> NEW[新 VMA 策略及后续建表]
+    USER --> MPROTECT[mprotect 的 prot 参数]
+    MPROTECT --> RANGE[指定范围的 VMA 及已有页表]
+    ENABLE -.-> KERNEL[enable 模式的内核映射策略]
+    KERNEL --> KPROT[pgprot_pbha_bit0]
+    DRIVER[驱动请求完整 PBHA 值] --> PGPROT[pgprot_pbha]
+    KPROT --> PGPROT
+    PGPROT --> KMAP[调用者使用属性构造内核或驱动映射]
+```
+
+图中两条进程级路径共用更新实现；`mmap/mprotect` 则复用各自的内存管理流程，不调用进程级全地址空间更新函数。使用范围和默认策略的差异见第 5.2、5.7、5.8 节。
+
+#### 5.1.2 两个进程级入口的处理流程
+
+```text
+写 /proc/<pid>/pbha_bit0
+ └─ pbha_bit0_write()
+     ├─ 获取目标任务，pbha_bit0_check() 检查功能与任务状态
+     ├─ 解析用户输入，只接受 0/1
+     ├─ get_task_mm() 获取目标地址空间
+     ├─ pbha_bit0_update_vma(mm, val)
+     └─ 释放 mm 和任务引用
+
+prctl(PR_UPDATE_PBHA_BIT0, val, 0, 0, 0)
+ └─ prctl 系统调用的对应分支
+     ├─ 检查 val 为 0/1，其余参数为 0
+     └─ pbha_bit0_update_vma(current->mm, val)
+```
+
+提供两种入口是为了覆盖不同使用方式：procfs 便于管理员或管理程序指定目标进程，prctl 便于应用主动调整自身策略。公共函数统一执行状态和页表更新；入口层的目标检查并不完全相同，不能把 procfs 的所有限制推定为 prctl 的行为。
+
+读取 `/proc/<pid>/pbha_bit0` 返回的是 mm 默认策略；`smaps`、`pagemap` 和 ptdump 是观测接口，不是额外的策略修改入口，详见第 5.9 节。
 
 本基线 ABI 常量为 `PROT_PBHA_BIT0 = 0x1000`、`PR_UPDATE_PBHA_BIT0 = 0x82312f0`。这些是该 openEuler 分支的扩展，不能直接当作其他内核的通用 ABI。编译应用时应使用匹配的目标头文件。
 
