@@ -130,6 +130,29 @@ flowchart TB
 
 仅提供通用 PBHA 的设备树平台可能有不同入口，不应由“未指定 pbha”推导出所有 PBHA 硬件能力都被关闭。
 
+#### 启动参数如何决定策略范围
+
+```mermaid
+flowchart TD
+    A[内核命令行] --> B[EFI stub 的 efi_parse_options]
+    B --> C{是否出现 pbha 参数名}
+    C -->|否| D[不触发本 EFI 路径的平台属性注入]
+    C -->|是| E[fdt_init_moc_mode 检查固件 Cache 模式并准备 FDT]
+    E --> F[early_pbha_init 与 early_pbha_bit0_init]
+    F --> G{早期平台检查是否通过}
+    G -->|否| H[setup_pbha 不开启 bit0 开关]
+    G -->|是| I[jump_label_init 后解析 early param]
+    I --> J[setup_pbha 解释参数值]
+    J -->|user| K[pbha_bit0_enabled 开启]
+    J -->|enable| L[bit0 与 kernel 两个开关均开启]
+    K --> M[允许用户通过 procfs prctl mmap mprotect 选择策略]
+    L --> M
+    L --> N[pgprot_pbha_bit0 为已接入内核建表路径添加属性]
+    L --> O[maybe_mk_pbha_bit0 对 global init 执行特殊处理]
+```
+
+EFI stub 只识别参数名，内核 `setup_pbha()` 才解释 `user/enable`。图中只列有效参数的路径；空值和非法值的基线问题见第 10 节。`enable` 增加内核建表策略和 init 特例，不等于遍历所有用户进程强制置位。
+
 ### 4.2 固件描述契约
 
 EFI stub 读取 `MemoryOnChipMode`，确认平台已经处于 Cache 模式后，把平台信息传给内核。它不负责改变固件模式。
@@ -319,6 +342,27 @@ flowchart LR
 
 `arch_vm_get_page_prot()` 直接映射 bit0，不另做完整值白名单检查。因此平台使能层必须保证值 `1` 已获允许，不能假定所有建表路径都再次执行白名单过滤。
 
+#### mmap：创建范围并保存后续建表策略
+
+```mermaid
+flowchart TD
+    A[mmap 指定长度及 prot] --> B[do_mmap 进入映射建立流程]
+    B --> C[calc_vm_prot_bits 调用 arch_calc_vm_prot_bits]
+    C --> D{功能启用且 prot 包含 PROT_PBHA_BIT0}
+    D -->|是| E[显式标志加入 VM_PBHA_BIT0]
+    D -->|否| F[显式标志不添加 PBHA]
+    E --> G[合入 mm 的 def_flags]
+    F --> G
+    G --> H[创建或合并 VMA 保存 vm_flags]
+    H --> I[vm_get_page_prot 调用 arch_vm_get_page_prot]
+    I --> J[形成包含 PBHA 策略的 vm_page_prot]
+    J --> K[后续缺页或实际建表时构造 leaf entry]
+```
+
+这里的“映射请求”指应用调用 `mmap()` 请求建立虚拟地址范围，不是硬件发出的访存事务。普通按需分配场景先建立 VMA，访问时才建立具体页表项；文件驱动或预填充等路径可以更早建表，但同样需要使用约定的映射属性。
+
+`mmap` 的显式标志与进程默认标志合并，因此默认值为 `1` 时，省略 `PROT_PBHA_BIT0` 不能表达关闭。需要局部关闭时，按第 5.8 节的目标设计对该范围执行 `mprotect()`。
+
 ### 5.3 进程级策略更新
 
 两个接口汇聚到同一个执行函数：
@@ -389,6 +433,74 @@ sequenceDiagram
 
 global init 的特殊处理不等于“强制所有用户进程永久设置 bit0”。它不直接设置 `mm->def_flags`，应分别检查实际 VMA 继承和默认策略。
 
+#### 5.5.1 fork：复制策略，建立独立的地址空间
+
+```mermaid
+flowchart TD
+    A[fork 创建子进程] --> B[copy_mm 选择复制地址空间]
+    B --> C[dup_mm 创建新的 mm]
+    C --> D[mm_init 从父进程继承默认标志]
+    D --> E[VM_INIT_DEF_MASK 保留 VM_PBHA_BIT0]
+    E --> F[dup_mmap 复制可继承的 VMA]
+    F --> G[vm_area_dup 保留 VMA 标志和建表属性]
+    G --> H[copy_page_range 处理需要复制的已有页表]
+    H --> I[子进程已有映射保留对应 PBHA 属性]
+    G --> J[未复制或尚未建立的映射按子 VMA 后续建表]
+    I --> K[父子地址空间可分别修改策略]
+    J --> K
+```
+
+普通 fork 后父子拥有不同的 mm 和页表，但可以暂时共享物理页；PBHA 属于各自的映射。写时复制需要建立新 PTE 时，继续使用相应 VMA 的策略。图中只讨论可继承 VMA，`VM_DONTCOPY` 等原有继承规则仍然生效。
+
+#### 5.5.2 exec：保留默认策略，重新建立程序映射
+
+```mermaid
+flowchart TD
+    A[exec 加载新程序] --> B[bprm_mm_init]
+    B --> C[mm_alloc 创建新 mm]
+    C --> D[mm_init 读取当前旧 mm 的 def_flags]
+    D --> E[按 VM_INIT_DEF_MASK 保留默认 PBHA 位]
+    E --> F[加载器建立新程序的代码 数据 栈等 VMA]
+    F --> G[通过相应映射路径应用新 mm 默认策略]
+    G --> H[新建页表按新 VMA 的属性生成]
+    OLD[旧程序各 VMA 的局部 PBHA 选择] -.-> DROP[不作为逐段配置复制到新程序]
+```
+
+例如旧进程默认值为 `0`，只对一个 VMA 设置了 bit0，exec 后不会记住该地址段的局部选择；默认值若为 `1`，新 mm 则继承这个默认值。exec 创建临时栈等有独立路径，图示表达默认策略的继承关系，不据此保证基线所有早期已建页表都完成了属性同步。
+
+#### 5.5.3 共享 mm 与共享物理页是两种情况
+
+```mermaid
+flowchart LR
+    T1[线程 A] --> MM[同一个 mm 与页表]
+    T2[线程 B] --> MM
+    MM --> U[进程级更新对双方共同生效]
+    PA[进程 A 的 VMA] --> EA[leaf entry A 的 bit59 为 1]
+    PB[进程 B 的 VMA] --> EB[leaf entry B 的 bit59 为 0]
+    EA --> PAGE[同一个物理页]
+    EB --> PAGE
+```
+
+共享 mm 的线程共同使用策略；只共享物理页的两个进程仍可持有不同的 leaf entry。修改 B 的映射不会因为物理页相同而改写 A 的页表项；平台负责保证不同 PBHA 属性访问同一数据时的一致性。
+
+#### 5.5.4 global init：缺页路径的特殊策略
+
+```mermaid
+flowchart TD
+    A[已接入的建表路径调用 maybe_mk_pbha_bit0] --> B{bit0 功能是否开启}
+    B -->|否| X[返回传入的页表项]
+    B -->|是| C{当前是否为 global init 且内核策略开启}
+    C -->|是| D[为当前 VMA 添加 VM_PBHA_BIT0]
+    C -->|否| E[保持原 VMA 标志]
+    D --> F{VMA 是否设置 VM_PBHA_BIT0}
+    E --> F
+    F -->|是| G[pte_mkpbha 为本次页表项设置 bit59]
+    F -->|否| X
+    G --> H[由调用者安装页表项]
+```
+
+该辅助函数不直接设置 `mm->def_flags`，也不遍历 init 的全部已有页表。因此只能据具体 VMA 和页表判断策略，不能推出“init 及其所有后代的默认值都为 1”。procfs 禁止直接修改 global init 是入口权限规则，与这里的自动建表策略是两回事。
+
 ### 5.6 权限、错误与观测
 
 procfs 条目权限为 `0644`，通过文件权限及任务有效性检查约束访问；`prctl` 操作当前地址空间。函数级任务检查并未在两个入口完全统一，不能把 procfs 的全部限制视为公共接口保证。
@@ -447,7 +559,7 @@ flowchart TD
 
 图中为受支持映射的更新设计，未把所有特殊映射归入普通页。基线 walker 跳过 `VM_PFNMAP`，也没有 hugetlb 专用回调；其边界见第 5.5 节。基线按 mm 默认值提前返回的行为不代表所有 VMA 已经一致，设计上不能只凭默认值判断整个地址空间无需修改。
 
-### 5.8 地址范围级修改与进程级修改的关系
+### 5.8 mprotect：修改指定范围的 VMA 与已有页表
 
 `mmap()` 创建新 VMA；`mprotect()` 修改已有虚拟地址范围。地址范围已经有 VMA，但其中的页面可以尚未建立物理映射。两者都复用 VMA 保存 PBHA 策略，不要求为了设置属性提前分配物理页。
 
@@ -456,7 +568,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[mprotect 指定地址范围与 prot] --> B[do_mprotect_pkey 检查参数和属性支持]
-    B --> C[排除旧 PBHA 标志 并按本次 prot 生成 newflags]
+    B --> C[VM_ARCH_CLEAR 清除旧 PBHA 标志 再按 prot 生成 newflags]
     C --> D[mprotect_fixup 按范围拆分或合并 VMA]
     D --> E[更新 vm_flags 和 vm_page_prot]
     E --> F[change_protection 更新已有映射]
@@ -466,7 +578,7 @@ flowchart TD
     G -->|hugetlb| J[huge_pte_modify]
     I --> H
     J --> H
-    H --> K[以新属性替换旧 leaf entry 的 bit59]
+    H --> K[pte_modify 的 mask 包含 PTE_PBHA0 替换 bit59]
     K --> L[沿用既有页表提交和 TLB 同步流程]
     E -.-> M[尚未建立的映射在后续缺页时使用新属性]
 ```
