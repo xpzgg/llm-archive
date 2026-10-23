@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | 1.1，设计评审稿 |
-| 更新日期 | 2026-10-23；补充使能、控制面和数据面的设计流程 |
+| 文档版本 | 1.2，设计评审稿 |
+| 更新日期 | 2026-10-23；统一时序图，按使能、控制、继承与观测重排设计章节 |
 | 编写日期 | 2026-10-22 |
 | 适用对象 | 内核、固件、芯片平台、虚拟化及测试开发人员 |
 | 适用范围 | openEuler OLK-5.10，Arm64，基于 HPDS2 的 PBHA 支持及平台 PBHA bit0 控制 |
@@ -130,29 +130,6 @@ flowchart TB
 
 仅提供通用 PBHA 的设备树平台可能有不同入口，不应由“未指定 pbha”推导出所有 PBHA 硬件能力都被关闭。
 
-#### 启动参数如何决定策略范围
-
-```mermaid
-flowchart TD
-    A[内核命令行] --> B[EFI stub 的 efi_parse_options]
-    B --> C{是否出现 pbha 参数名}
-    C -->|否| D[不触发本 EFI 路径的平台属性注入]
-    C -->|是| E[fdt_init_moc_mode 检查固件 Cache 模式并准备 FDT]
-    E --> F[early_pbha_init 与 early_pbha_bit0_init]
-    F --> G{早期平台检查是否通过}
-    G -->|否| H[setup_pbha 不开启 bit0 开关]
-    G -->|是| I[jump_label_init 后解析 early param]
-    I --> J[setup_pbha 解释参数值]
-    J -->|user| K[pbha_bit0_enabled 开启]
-    J -->|enable| L[bit0 与 kernel 两个开关均开启]
-    K --> M[允许用户通过 procfs prctl mmap mprotect 选择策略]
-    L --> M
-    L --> N[pgprot_pbha_bit0 为已接入内核建表路径添加属性]
-    L --> O[maybe_mk_pbha_bit0 对 global init 执行特殊处理]
-```
-
-EFI stub 只识别参数名，内核 `setup_pbha()` 才解释 `user/enable`。图中只列有效参数的路径；空值和非法值的基线问题见第 10 节。`enable` 增加内核建表策略和 init 特例，不等于遍历所有用户进程强制置位。
-
 ### 4.2 固件描述契约
 
 EFI stub 读取 `MemoryOnChipMode`，确认平台已经处于 Cache 模式后，把平台信息传给内核。它不负责改变固件模式。
@@ -173,27 +150,55 @@ EFI 路径将上述属性写入 `/chosen`；通用设计兼容 `/cpus` 的 perfo
 ```mermaid
 sequenceDiagram
     participant EFI as EFI stub
-    participant FW as 固件变量
-    participant FDT as FDT
+    participant FW as 固件与 FDT
     participant EARLY as 内核早期启动
-    participant CPU as 当前 CPU
+    participant CPU as CPU
     participant ARCH as setup_arch
-    EFI->>EFI: efi_parse_options 识别 pbha 参数名
-    EFI->>FW: fdt_init_moc_mode 读取 MemoryOnChipMode
-    FW-->>EFI: Cache 模式
-    EFI->>FDT: 写入 bit0 描述和 performance-only 值
-    EARLY->>FDT: early_fdt_map 建立访问映射
-    EARLY->>FDT: early_pbha_init 读取允许值
-    EARLY->>CPU: cpu_has_pbha 检查 HPDS2
-    EARLY->>EARLY: 生成值白名单和开放位掩码
-    EARLY->>CPU: enable_pbha_inner 配置 TCR 并同步
-    EARLY->>EARLY: early_pbha_bit0_init 标记平台就绪
-    ARCH->>ARCH: jump_label_init
-    ARCH->>ARCH: parse_early_param 调用 setup_pbha
-    ARCH->>ARCH: 按 user 或 enable 打开 static key
+    participant KEY as 策略开关
+    EFI->>EFI: efi_parse_options() 识别 pbha 参数名
+    opt 提供了 pbha 参数
+        EFI->>FW: fdt_init_moc_mode() 读取 MemoryOnChipMode
+        alt Cache 模式
+            EFI->>FW: 向 chosen 写入平台标记及允许值列表
+        else 非 Cache 模式或读取失败
+            Note over EFI,FW: 不注入本 EFI 路径的 bit0 描述
+        end
+    end
+    EARLY->>FW: early_fdt_map() 映射 FDT
+    EARLY->>FW: early_pbha_init() 读取允许值
+    EARLY->>CPU: cpu_has_pbha() 检查 HPDS2
+    opt CPU 能力和描述满足条件
+        EARLY->>EARLY: update_pbha_perf_only_bit() 生成白名单与开放掩码
+        EARLY->>CPU: enable_pbha_inner() 配置 TCR、ISB、TLB 同步
+        EARLY->>FW: early_pbha_bit0_init() 检查 linux,pbha-bit0
+        opt 平台标记符合条件
+            EARLY->>EARLY: pbha_enabled_phase_1 = true
+        end
+    end
+    ARCH->>ARCH: jump_label_init()
+    ARCH->>ARCH: parse_early_param() 调用 setup_pbha()
+    alt 平台未就绪
+        Note over ARCH,KEY: 不打开平台 bit0 开关
+    else 平台就绪且参数为 user
+        ARCH->>KEY: 打开 pbha_bit0_enabled
+    else 平台就绪且参数为 enable
+        ARCH->>KEY: 打开 bit0 和 kernel 两个开关
+    end
+    Note over ARCH,KEY: 非法或空参数的基线问题见第 10 节
 ```
 
 采用分阶段初始化的原因：CPU 属性能力需要在早期内存映射构建前准备；平台策略开关采用 static key，应在 jump label 初始化完成后启用。EFI stub 与内核分别解释同一参数的不同部分：前者识别参数名，后者解释 `user/enable` 模式。
+
+#### 分阶段初始化的职责
+
+使能过程分别解决三个问题：固件是否提供了适用的平台模式、CPU 是否能够传递这些属性、操作系统是否开放对应控制接口。三者成立后，应用才能选择具体映射的 PBHA 属性；使能本身不等于给所有用户页设置 bit59。
+
+图中描述正常设计流程；FDT 写入失败由 EFI 启动流程处理，属性回退和异常参数的基线差距见第 10 节。
+
+- **EFI stub 负责传递平台信息**：`/chosen` 是 FDT 中保存启动配置的节点。`linux,pbha-bit0=1` 表示固件报告了适用的 Cache 模式，不是给某个页表项写入 `1`。
+- **通用初始化负责开放硬件属性位**：`arm,pbha-performance-only` 是允许值列表。例如 `{1, 0, ...}` 表示允许值 `0` 和 `1`；软件保存允许值集合，硬件配置只开放这些值涉及的位。
+- **平台初始化负责开放软件策略**：`pbha_enabled_phase_1` 只是早期阶段完成标记。`setup_pbha()` 在 static key 可以使用之后，再决定开放用户控制，还是同时对已接入的内核建表路径设置 bit0。
+- **CPU 特性框架负责其他 CPU 的一致配置**：后续通过 `cpu_enable_pbha()` 接续早期设置。不能只配置启动 CPU，否则任务迁移后可能遇到不同的属性解释。
 
 ### 4.4 函数职责
 
@@ -227,37 +232,6 @@ sequenceDiagram
 - 缺失或非法固件属性不应导致访问空指针或误开放属性，解析路径必须有边界检查。
 - 启动参数应明确使用 `pbha=user` 或 `pbha=enable`。空值和非法值的健壮性属于验收条件，不能把裸 `pbha` 作为已验证用法。
 
-### 4.7 分阶段使能的设计思路
-
-使能过程分别解决三个问题：固件是否提供了适用的平台模式、CPU 是否能够传递这些属性、操作系统是否开放对应控制接口。三者成立后，应用才能选择具体映射的 PBHA 属性；使能本身不等于给所有用户页设置 bit59。
-
-```mermaid
-flowchart TD
-    A[EFI stub 识别到 pbha 参数名] --> B[fdt_init_moc_mode 读取固件变量]
-    B --> C{MemoryOnChipMode 是否为 Cache}
-    C -->|否或读取失败| X[不注入本 EFI 路径的 bit0 描述]
-    C -->|是| D[向 FDT chosen 写入平台标记和值列表]
-    D --> E[early_fdt_map 映射 FDT]
-    E --> F[early_pbha_init 读取 performance-only 列表]
-    F --> G{CPU 能力与属性描述满足要求}
-    G -->|否| Y[不开放平台 bit0 功能]
-    G -->|是| H[生成允许值位图与硬件开放位掩码]
-    H --> I[enable_pbha_inner 配置启动 CPU 的 TCR 并同步]
-    I --> J[early_pbha_bit0_init 检查平台标记]
-    J --> K[pbha_enabled_phase_1 表示早期平台检查通过]
-    K --> L[jump_label_init 后由 setup_pbha 解释模式]
-    L --> M{启动模式}
-    M -->|user| N[打开用户 bit0 控制能力]
-    M -->|enable| O[打开 bit0 控制能力及内核映射策略]
-```
-
-图中描述正常设计流程；FDT 写入失败由 EFI 启动流程处理，属性回退和异常参数的基线差距见第 10 节。
-
-- **EFI stub 负责传递平台信息**：`/chosen` 是 FDT 中保存启动配置的节点。`linux,pbha-bit0=1` 表示固件报告了适用的 Cache 模式，不是给某个页表项写入 `1`。
-- **通用初始化负责开放硬件属性位**：`arm,pbha-performance-only` 是允许值列表。例如 `{1, 0, ...}` 表示允许值 `0` 和 `1`；软件保存允许值集合，硬件配置只开放这些值涉及的位。
-- **平台初始化负责开放软件策略**：`pbha_enabled_phase_1` 只是早期阶段完成标记。`setup_pbha()` 在 static key 可以使用之后，再决定开放用户控制，还是同时对已接入的内核建表路径设置 bit0。
-- **CPU 特性框架负责其他 CPU 的一致配置**：后续通过 `cpu_enable_pbha()` 接续早期设置。不能只配置启动 CPU，否则任务迁移后可能遇到不同的属性解释。
-
 ## 5. 控制面设计
 
 ### 5.1 策略粒度与接口
@@ -266,136 +240,92 @@ flowchart TD
 
 进程级接口操作的是 `mm_struct`。多个线程共享同一 mm 时，修改影响整个共享地址空间，不是某个线程的私有策略。地址范围级接口只影响当前地址空间中的指定范围，不修改进程默认值。
 
-#### 5.1.1 入口总览
-
 | 类别 | 入口及调用方式 | 控制对象 | 设计行为 |
 | --- | --- | --- | --- |
 | 进程级：外部指定目标 | 向 `/proc/<pid>/pbha_bit0` 写入 `0` 或 `1` | 指定任务的 mm，受访问权限及任务检查约束 | 更新默认策略、已有 VMA 和受支持的已有页表 |
 | 进程级：应用自控制 | `prctl(PR_UPDATE_PBHA_BIT0, val, 0, 0, 0)` | 调用者当前 mm | 与 procfs 汇聚到同一个更新函数，`val` 为 `0/1` |
 | 地址范围级：新建 | `mmap(..., prot \| PROT_PBHA_BIT0, ...)` | 新建 VMA | 显式设置属性，并合入 mm 默认标志；后续建表使用该策略 |
-| 地址范围级：修改 | `mprotect(addr, len, prot)` | 当前 mm 的指定已有地址范围 | 按本次 `prot` 设置或清除 PBHA，并同步已有映射；这是第 5.8 节的目标语义，基线尚有缺口 |
+| 地址范围级：修改 | `mprotect(addr, len, prot)` | 当前 mm 的指定已有地址范围 | 按本次 `prot` 设置或清除 PBHA，并同步已有映射；这是第 5.4 节的目标语义，基线尚有缺口 |
 | 系统启动级 | `pbha=user` / `pbha=enable` | 功能开关和内核映射策略 | 前者开放用户控制，后者同时对已接入内核建表路径启用 bit0 策略；不等于所有用户页自动置位 |
 | 内核映射辅助接口 | `pgprot_pbha(prot, value)` | 驱动等内核代码构造的映射属性 | 生成允许值范围内的 PBHA 属性，调用者负责把它用于具体建表；不是用户态系统调用 |
 
+本基线 ABI 常量为 `PROT_PBHA_BIT0 = 0x1000`、`PR_UPDATE_PBHA_BIT0 = 0x82312f0`。这些是该 openEuler 分支的扩展，不能直接当作其他内核的通用 ABI。编译应用时应使用匹配的目标头文件。
+
+### 5.2 进程级控制：入口与三层状态更新
+
+#### 5.2.1 procfs 与 prctl 入口
+
 ```mermaid
-flowchart TD
-    BOOT[启动参数 pbha=user 或 enable] --> ENABLE[Feature 使能及策略开关]
-    ENABLE -.-> USER[开放用户 PBHA 控制]
-    USER --> PROC[写 proc pid pbha_bit0]
-    USER --> PRCTL[prctl PR_UPDATE_PBHA_BIT0]
-    PROC --> WRITE[pbha_bit0_write 获取目标 mm]
-    PRCTL --> CURRENT[校验参数 使用 current mm]
-    WRITE --> UPDATE[pbha_bit0_update_vma]
-    CURRENT --> UPDATE
-    UPDATE --> ALL[默认策略 加已有 VMA 加已有页表]
-    USER --> MMAP[mmap 的 PROT_PBHA_BIT0]
-    MMAP --> NEW[新 VMA 策略及后续建表]
-    USER --> MPROTECT[mprotect 的 prot 参数]
-    MPROTECT --> RANGE[指定范围的 VMA 及已有页表]
-    ENABLE -.-> KERNEL[enable 模式的内核映射策略]
-    KERNEL --> KPROT[pgprot_pbha_bit0]
-    DRIVER[驱动请求完整 PBHA 值] --> PGPROT[pgprot_pbha]
-    KPROT --> PGPROT
-    PGPROT --> KMAP[调用者使用属性构造内核或驱动映射]
-```
-
-图中两条进程级路径共用更新实现；`mmap/mprotect` 则复用各自的内存管理流程，不调用进程级全地址空间更新函数。使用范围和默认策略的差异见第 5.2、5.7、5.8 节。
-
-#### 5.1.2 两个进程级入口的处理流程
-
-```text
-写 /proc/<pid>/pbha_bit0
- └─ pbha_bit0_write()
-     ├─ 获取目标任务，pbha_bit0_check() 检查功能与任务状态
-     ├─ 解析用户输入，只接受 0/1
-     ├─ get_task_mm() 获取目标地址空间
-     ├─ pbha_bit0_update_vma(mm, val)
-     └─ 释放 mm 和任务引用
-
-prctl(PR_UPDATE_PBHA_BIT0, val, 0, 0, 0)
- └─ prctl 系统调用的对应分支
-     ├─ 检查 val 为 0/1，其余参数为 0
-     └─ pbha_bit0_update_vma(current->mm, val)
+sequenceDiagram
+    participant U as 调用者
+    participant PROC as procfs
+    participant PR as prctl
+    participant TASK as 目标任务与 mm
+    participant UPDATE as 公共更新函数
+    alt 写入指定进程的 procfs 文件
+        U->>PROC: 写入 /proc/pid/pbha_bit0，值为 0 或 1
+        PROC->>TASK: 获取目标任务并执行 pbha_bit0_check()
+        PROC->>PROC: 解析并校验输入
+        PROC->>TASK: get_task_mm()
+        PROC->>UPDATE: pbha_bit0_update_vma(mm, val)
+        UPDATE-->>PROC: 返回更新结果
+        PROC->>TASK: 释放 mm 和任务引用
+        PROC-->>U: 返回写入结果
+    else 应用修改自己的地址空间
+        U->>PR: PR_UPDATE_PBHA_BIT0，val，0，0，0
+        PR->>PR: 校验 val 和其余参数
+        PR->>UPDATE: pbha_bit0_update_vma(current mm, val)
+        UPDATE-->>PR: 返回更新结果
+        PR-->>U: 返回系统调用结果
+    end
 ```
 
 提供两种入口是为了覆盖不同使用方式：procfs 便于管理员或管理程序指定目标进程，prctl 便于应用主动调整自身策略。公共函数统一执行状态和页表更新；入口层的目标检查并不完全相同，不能把 procfs 的所有限制推定为 prctl 的行为。
 
-读取 `/proc/<pid>/pbha_bit0` 返回的是 mm 默认策略；`smaps`、`pagemap` 和 ptdump 是观测接口，不是额外的策略修改入口，详见第 5.9 节。
+读取 `/proc/<pid>/pbha_bit0` 返回的是 mm 默认策略；`smaps`、`pagemap` 和 ptdump 是观测接口，不是额外的策略修改入口，详见第 5.8 节。
 
-本基线 ABI 常量为 `PROT_PBHA_BIT0 = 0x1000`、`PR_UPDATE_PBHA_BIT0 = 0x82312f0`。这些是该 openEuler 分支的扩展，不能直接当作其他内核的通用 ABI。编译应用时应使用匹配的目标头文件。
+#### 5.2.2 公共更新流程
 
-### 5.2 策略保存与新映射构造
-
-```mermaid
-flowchart LR
-    REQ[映射请求中的 PROT_PBHA_BIT0] --> CALC[arch_calc_vm_prot_bits]
-    CALC --> VMA[VMA 的 VM_PBHA_BIT0]
-    DEF[mm 默认 VM_PBHA_BIT0] --> VMA
-    VMA --> PROT[arch_vm_get_page_prot]
-    PROT --> TEMPLATE[vm_page_prot 中的 PTE_PBHA0]
-    TEMPLATE --> LEAF[缺页或建表时生成叶子项]
-```
-
-新映射的策略由显式请求和 mm 默认标志合成。`do_mmap()` 合入 `mm->def_flags`，因此默认值为 `1` 时，仅在 `mmap` 参数中省略 `PROT_PBHA_BIT0`，不表示显式请求关闭 bit0。
-
-`arch_calc_vm_prot_bits()` 在特性启用时把用户标志转换为 `VM_PBHA_BIT0`；`arch_vm_get_page_prot()` 将该标志转换为 `PTE_PBHA0`。在白名单辅助路径中，`__pbha_check_perf_only()` 校验完整值，`pgprot_pbha()` 更新属性字段，`pte_mkpbha()` 和 `pte_rmpbha()` 分别设置、清除指定属性位。
-
-`arch_vm_get_page_prot()` 直接映射 bit0，不另做完整值白名单检查。因此平台使能层必须保证值 `1` 已获允许，不能假定所有建表路径都再次执行白名单过滤。
-
-#### mmap：创建范围并保存后续建表策略
-
-```mermaid
-flowchart TD
-    A[mmap 指定长度及 prot] --> B[do_mmap 进入映射建立流程]
-    B --> C[calc_vm_prot_bits 调用 arch_calc_vm_prot_bits]
-    C --> D{功能启用且 prot 包含 PROT_PBHA_BIT0}
-    D -->|是| E[显式标志加入 VM_PBHA_BIT0]
-    D -->|否| F[显式标志不添加 PBHA]
-    E --> G[合入 mm 的 def_flags]
-    F --> G
-    G --> H[创建或合并 VMA 保存 vm_flags]
-    H --> I[vm_get_page_prot 调用 arch_vm_get_page_prot]
-    I --> J[形成包含 PBHA 策略的 vm_page_prot]
-    J --> K[后续缺页或实际建表时构造 leaf entry]
-```
-
-这里的“映射请求”指应用调用 `mmap()` 请求建立虚拟地址范围，不是硬件发出的访存事务。普通按需分配场景先建立 VMA，访问时才建立具体页表项；文件驱动或预填充等路径可以更早建表，但同样需要使用约定的映射属性。
-
-`mmap` 的显式标志与进程默认标志合并，因此默认值为 `1` 时，省略 `PROT_PBHA_BIT0` 不能表达关闭。需要局部关闭时，按第 5.8 节的目标设计对该范围执行 `mprotect()`。
-
-### 5.3 进程级策略更新
-
-两个接口汇聚到同一个执行函数：
-
-```text
-procfs 写入 → pbha_bit0_write() ─┐
-                               ├→ pbha_bit0_update_vma(mm, val)
-prctl 系统调用 ────────────────┘
-```
-
-设计要求是：在受支持的映射范围内，更新 mm 默认策略、已有 VMA 的策略和现存页表，随后使后续新映射继承该默认策略。
+进程级请求表达的是“该地址空间采用指定策略”。只改其中一层，会使新旧映射采用不同属性。因此更新由默认策略、现有 VMA 和现有页表三部分组成。
 
 ```mermaid
 sequenceDiagram
-    participant APP as 应用或管理员
-    participant API as procfs / prctl
-    participant MM as pbha_bit0_update_vma
-    participant VMA as mm 与 VMA
+    participant U as procfs 或 prctl
+    participant UPDATE as pbha_bit0_update_vma
+    participant MM as mm 与 VMA
     participant PT as 页表
-    participant TLB as MMU 相关使用者与 TLB
-    APP->>API: 请求设置或清除 bit0
-    API->>API: 校验参数并获取目标 mm
-    API->>MM: 传入 mm 与 val
-    MM->>MM: 检查特性并获取 mmap 写锁
-    MM->>VMA: 更新默认值、VMA 标志和 vm_page_prot
-    MM->>TLB: invalidate_range_start
-    MM->>PT: walk_page_range 更新受支持的叶子项
-    MM->>TLB: invalidate_range_end
-    MM->>TLB: flush_tlb_mm
-    MM->>MM: 释放 mmap 写锁
-    MM-->>API: 返回执行结果
-    API-->>APP: 返回结果
+    participant SYNC as MMU notifier 与 TLB
+    U->>UPDATE: 请求设置或清除 bit0
+    UPDATE->>UPDATE: 检查功能并获取 mmap 写锁
+    UPDATE->>MM: 更新 mm.def_flags，控制后续新增 VMA
+    loop 遍历已有 VMA
+        UPDATE->>MM: 设置或清除 VM_PBHA_BIT0
+        UPDATE->>MM: vma_set_page_prot() 更新建表模板
+    end
+    UPDATE->>SYNC: inc_tlb_flush_pending 与 invalidate_range_start
+    UPDATE->>PT: walk_page_range()
+    loop 受支持的已有映射
+        alt THP
+            PT->>PT: 持有 PMD 锁，pbha_bit0_update_pmd_bits()
+        else 普通页
+            PT->>PT: 持有 PTE 锁，pbha_bit0_update_pte_bits()
+        else 尚未建立映射
+            Note over MM,PT: 不提前分配页面，后续建表读取 VMA 策略
+        end
+    end
+    UPDATE->>SYNC: invalidate_range_end 与 flush_tlb_mm()
+    UPDATE->>SYNC: dec_tlb_flush_pending()
+    UPDATE->>UPDATE: 释放 mmap 写锁
+    UPDATE-->>U: 返回结果
 ```
+
+| 更新对象 | 生效对象 | 为什么需要 |
+| --- | --- | --- |
+| `mm->def_flags` | 后续新增 VMA | 新的 `mmap` 可以继承进程默认策略 |
+| `vm_flags` 与 `vm_page_prot` | 已有 VMA 中后续建立的映射 | 尚未访问的页面，以及需要重新建表的路径，有可读取的持久策略 |
+| 已有 leaf entry 与 TLB | 已经建立映射的页面 | 现有访问不一定再次缺页，必须主动更新属性并使旧转换失效 |
+
+图中为受支持映射的更新设计，未把所有特殊映射归入普通页。基线 walker 跳过 `VM_PFNMAP`，也没有 hugetlb 专用回调；其边界见第 5.6 节。基线按 mm 默认值提前返回的行为不代表所有 VMA 已经一致，设计上不能只凭默认值判断整个地址空间无需修改。
 
 关键职责如下：
 
@@ -409,7 +339,84 @@ sequenceDiagram
 | `pbha_bit0_update_pte_bits()` | 对 present PTE 使用保护属性修改接口设置或清除 bit0 |
 | `pbha_bit0_update_pmd_bits()` | 更新已识别的 THP PMD 属性 |
 
-### 5.4 并发与一致性契约
+### 5.3 mmap：创建范围并保存策略
+
+新映射的策略由显式请求和 mm 默认标志合成。`do_mmap()` 合入 `mm->def_flags`，因此默认值为 `1` 时，仅在 `mmap` 参数中省略 `PROT_PBHA_BIT0`，不表示显式请求关闭 bit0。
+
+`arch_calc_vm_prot_bits()` 在特性启用时把用户标志转换为 `VM_PBHA_BIT0`；`arch_vm_get_page_prot()` 将该标志转换为 `PTE_PBHA0`。在白名单辅助路径中，`__pbha_check_perf_only()` 校验完整值，`pgprot_pbha()` 更新属性字段，`pte_mkpbha()` 和 `pte_rmpbha()` 分别设置、清除指定属性位。
+
+`arch_vm_get_page_prot()` 直接映射 bit0，不另做完整值白名单检查。因此平台使能层必须保证值 `1` 已获允许，不能假定所有建表路径都再次执行白名单过滤。
+
+```mermaid
+sequenceDiagram
+    participant APP as 应用
+    participant MAP as do_mmap
+    participant MM as 当前 mm
+    participant VMA as 新建或合并的 VMA
+    participant ARCH as 架构属性转换
+    participant PT as 后续建表路径
+    APP->>MAP: mmap(..., prot, ...)
+    MAP->>ARCH: calc_vm_prot_bits() / arch_calc_vm_prot_bits()
+    ARCH-->>MAP: 功能开启且显式请求时生成 VM_PBHA_BIT0
+    MAP->>MM: 读取 mm.def_flags
+    MM-->>MAP: 返回进程默认标志
+    MAP->>VMA: 合并显式标志与默认标志，保存 vm_flags
+    MAP->>ARCH: vm_get_page_prot() / arch_vm_get_page_prot()
+    ARCH-->>VMA: 生成包含 PBHA 策略的 vm_page_prot
+    MAP-->>APP: 返回映射地址
+    Note over APP,PT: 图示普通按需建表场景
+    APP->>PT: 后续访问触发缺页
+    PT->>VMA: 读取建表属性
+    PT->>PT: 构造并安装带 PBHA 的 leaf entry
+```
+
+这里的“映射请求”指应用调用 `mmap()` 请求建立虚拟地址范围，不是硬件发出的访存事务。普通按需分配场景先建立 VMA，访问时才建立具体页表项；文件驱动或预填充等路径可以更早建表，但同样需要使用约定的映射属性。
+
+`mmap` 的显式标志与进程默认标志合并，因此默认值为 `1` 时，省略 `PROT_PBHA_BIT0` 不能表达关闭。需要局部关闭时，按第 5.4 节的目标设计对该范围执行 `mprotect()`。
+
+### 5.4 mprotect：修改范围与已有映射
+
+`mmap()` 创建新 VMA；`mprotect()` 修改已有虚拟地址范围。地址范围已经有 VMA，但其中的页面可以尚未建立物理映射。两者都复用 VMA 保存 PBHA 策略，不要求为了设置属性提前分配物理页。
+
+本设计采用本次讨论确认的接口语义：**`mprotect()` 的 PBHA 标志与 READ、WRITE 一样，由本次 `prot` 参数重新指定；传入 `PROT_PBHA_BIT0` 则设置，省略则清除。** 它只影响指定范围，不改变 `mm->def_flags`。这与 `mmap()` 合入进程默认标志的规则不同。
+
+```mermaid
+sequenceDiagram
+    participant APP as 应用
+    participant MP as do_mprotect_pkey
+    participant VMA as VMA 与属性模板
+    participant CHANGE as change_protection
+    participant PT as 页表属性修改
+    participant TLB as TLB
+    APP->>MP: mprotect(addr, len, prot)
+    MP->>MP: arch_validate_prot() 检查属性支持
+    MP->>MP: 从旧标志清除 PBHA，再按 prot 生成 newflags
+    Note over MP,VMA: 目标语义：传入则设置，省略则清除
+    MP->>VMA: mprotect_fixup() 拆分或合并范围
+    MP->>VMA: 更新 vm_flags，vma_set_page_prot()
+    MP->>CHANGE: 提交该范围的新 vm_page_prot
+    alt 已有普通页
+        CHANGE->>PT: pte_modify(oldpte, newprot)
+    else 已有 THP
+        CHANGE->>PT: pmd_modify() 调用 pte_modify()
+    else 已有 hugetlb
+        CHANGE->>PT: huge_pte_modify() 调用 pte_modify()
+    else 尚未建立映射
+        Note over VMA,PT: 不分配物理页，后续建表使用新 VMA 属性
+    end
+    Note over CHANGE,PT: 目标要求 mask 包含 PTE_PBHA0，替换 bit59
+    PT->>PT: 按既有页表锁和提交机制安装修改
+    CHANGE->>TLB: 沿用该路径的 TLB 同步
+    MP-->>APP: 返回结果，不修改 mm.def_flags
+```
+
+这里的图表示目标设计，不表示首页基线已经实现全部步骤。落实设计需要把 `VM_PBHA_BIT0` 纳入旧 VMA 标志清除集合，并使 `pte_modify()` 的更新掩码包含 `PTE_PBHA0`。后者会被普通页、THP 和 hugetlb 的属性修改路径复用，不需要额外调用进程级全地址空间 walker。
+
+`pte_modify()` 只替换掩码指定的属性位，保留物理地址和其他应保留的状态；因此“已走到页表更新函数”并不保证 PBHA 被更新。基线遗漏 bit59 的掩码，是已有映射不同步的原因。
+
+采用省略即清除的语义会改变基线保留 PBHA 的行为：应用后续仅修改读写权限时，如需保持 PBHA，应继续传入 `PROT_PBHA_BIT0`。该兼容性变化是此项接口设计的一部分。
+
+### 5.5 并发与一致性契约
 
 - 使用 `mmap_write_lock_killable()` 串行化 VMA 结构与策略修改；遍历时使用 PTE/PMD 锁保护具体页表项。
 - 用 MMU notifier 通知依赖该地址空间的其他 MMU 使用者，用 `flush_tlb_mm()` 使旧转换属性失效。
@@ -419,7 +426,7 @@ sequenceDiagram
 
 基线中的提前返回、锁外状态读取及遍历结果处理尚需收敛，详见第 10 节。
 
-### 5.5 继承、共享及特殊进程
+### 5.6 fork、exec 与共享关系
 
 | 场景 | 策略说明 |
 | --- | --- |
@@ -433,75 +440,105 @@ sequenceDiagram
 
 global init 的特殊处理不等于“强制所有用户进程永久设置 bit0”。它不直接设置 `mm->def_flags`，应分别检查实际 VMA 继承和默认策略。
 
-#### 5.5.1 fork：复制策略，建立独立的地址空间
+#### 5.6.1 fork：复制策略，建立独立的地址空间
 
 ```mermaid
-flowchart TD
-    A[fork 创建子进程] --> B[copy_mm 选择复制地址空间]
-    B --> C[dup_mm 创建新的 mm]
-    C --> D[mm_init 从父进程继承默认标志]
-    D --> E[VM_INIT_DEF_MASK 保留 VM_PBHA_BIT0]
-    E --> F[dup_mmap 复制可继承的 VMA]
-    F --> G[vm_area_dup 保留 VMA 标志和建表属性]
-    G --> H[copy_page_range 处理需要复制的已有页表]
-    H --> I[子进程已有映射保留对应 PBHA 属性]
-    G --> J[未复制或尚未建立的映射按子 VMA 后续建表]
-    I --> K[父子地址空间可分别修改策略]
-    J --> K
+sequenceDiagram
+    participant P as 父进程
+    participant FORK as copy_mm / dup_mm
+    participant MM as 子进程 mm
+    participant VMA as 子进程 VMA
+    participant PT as 子进程页表
+    P->>FORK: fork()，复制地址空间
+    FORK->>MM: mm_init()
+    P-->>MM: def_flags 按 VM_INIT_DEF_MASK 继承 PBHA 默认位
+    FORK->>VMA: dup_mmap() / vm_area_dup()
+    P-->>VMA: 复制可继承 VMA 的 vm_flags 和 vm_page_prot
+    FORK->>PT: copy_page_range()
+    opt 需要复制已有页表
+        P-->>PT: 复制映射并保留对应 PBHA 属性
+    end
+    Note over VMA,PT: 未复制或尚未建立的条目，后续按子 VMA 建表
+    FORK-->>P: 完成 fork
+    Note over P,PT: 父子 mm 独立，可各自修改 PBHA 策略
 ```
 
 普通 fork 后父子拥有不同的 mm 和页表，但可以暂时共享物理页；PBHA 属于各自的映射。写时复制需要建立新 PTE 时，继续使用相应 VMA 的策略。图中只讨论可继承 VMA，`VM_DONTCOPY` 等原有继承规则仍然生效。
 
-#### 5.5.2 exec：保留默认策略，重新建立程序映射
+#### 5.6.2 exec：保留默认策略，重新建立程序映射
 
 ```mermaid
-flowchart TD
-    A[exec 加载新程序] --> B[bprm_mm_init]
-    B --> C[mm_alloc 创建新 mm]
-    C --> D[mm_init 读取当前旧 mm 的 def_flags]
-    D --> E[按 VM_INIT_DEF_MASK 保留默认 PBHA 位]
-    E --> F[加载器建立新程序的代码 数据 栈等 VMA]
-    F --> G[通过相应映射路径应用新 mm 默认策略]
-    G --> H[新建页表按新 VMA 的属性生成]
-    OLD[旧程序各 VMA 的局部 PBHA 选择] -.-> DROP[不作为逐段配置复制到新程序]
+sequenceDiagram
+    participant OLD as 当前进程与旧 mm
+    participant EXEC as exec 加载流程
+    participant NEW as 新 mm
+    participant VMA as 新程序 VMA
+    participant PT as 新程序页表
+    OLD->>EXEC: exec() 加载新程序
+    EXEC->>NEW: bprm_mm_init() / mm_alloc() / mm_init()
+    NEW->>OLD: 读取当前 mm.def_flags
+    OLD-->>NEW: 按 VM_INIT_DEF_MASK 继承默认 PBHA 位
+    EXEC->>VMA: 建立新程序映射
+    NEW-->>VMA: 相应映射路径使用新 mm 默认策略
+    VMA->>PT: 建表时使用新的 vm_page_prot
+    Note over OLD,VMA: 旧 VMA 的局部 PBHA 选择不逐段继承
+    EXEC-->>OLD: 成功后运行新程序
 ```
 
 例如旧进程默认值为 `0`，只对一个 VMA 设置了 bit0，exec 后不会记住该地址段的局部选择；默认值若为 `1`，新 mm 则继承这个默认值。exec 创建临时栈等有独立路径，图示表达默认策略的继承关系，不据此保证基线所有早期已建页表都完成了属性同步。
 
-#### 5.5.3 共享 mm 与共享物理页是两种情况
+#### 5.6.3 共享 mm 与共享物理页是两种情况
 
 ```mermaid
-flowchart LR
-    T1[线程 A] --> MM[同一个 mm 与页表]
-    T2[线程 B] --> MM
-    MM --> U[进程级更新对双方共同生效]
-    PA[进程 A 的 VMA] --> EA[leaf entry A 的 bit59 为 1]
-    PB[进程 B 的 VMA] --> EB[leaf entry B 的 bit59 为 0]
-    EA --> PAGE[同一个物理页]
-    EB --> PAGE
+sequenceDiagram
+    participant A as 任务 A
+    participant B as 任务 B
+    participant MA as mm A 与页表
+    participant MB as mm B 与页表
+    participant HW as 硬件内存子系统
+    alt A 与 B 是共享 mm 的线程
+        A->>MA: 进程级接口更新 PBHA
+        B->>MA: 使用同一份 VMA 和页表
+        Note over A,MA: 更新对共享地址空间的线程共同生效
+    else A 与 B 只共享物理页
+        A->>MA: 经映射 A 访问，bit59 为 1
+        MA->>HW: 访问物理页 P，携带 PBHA=1
+        B->>MB: 经映射 B 访问，bit59 为 0
+        MB->>HW: 访问同一物理页 P，携带 PBHA=0
+        Note over MA,HW: 两份页表独立，硬件保证数据一致性
+    end
 ```
 
 共享 mm 的线程共同使用策略；只共享物理页的两个进程仍可持有不同的 leaf entry。修改 B 的映射不会因为物理页相同而改写 A 的页表项；平台负责保证不同 PBHA 属性访问同一数据时的一致性。
 
-#### 5.5.4 global init：缺页路径的特殊策略
+#### 5.6.4 global init：缺页路径的特殊策略
 
 ```mermaid
-flowchart TD
-    A[已接入的建表路径调用 maybe_mk_pbha_bit0] --> B{bit0 功能是否开启}
-    B -->|否| X[返回传入的页表项]
-    B -->|是| C{当前是否为 global init 且内核策略开启}
-    C -->|是| D[为当前 VMA 添加 VM_PBHA_BIT0]
-    C -->|否| E[保持原 VMA 标志]
-    D --> F{VMA 是否设置 VM_PBHA_BIT0}
-    E --> F
-    F -->|是| G[pte_mkpbha 为本次页表项设置 bit59]
-    F -->|否| X
-    G --> H[由调用者安装页表项]
+sequenceDiagram
+    participant FAULT as 已接入的建表路径
+    participant HELP as maybe_mk_pbha_bit0
+    participant VMA as 当前 VMA
+    participant PT as 页表
+    FAULT->>HELP: 传入待安装 PTE 和 VMA
+    alt bit0 功能未开启
+        HELP-->>FAULT: 返回传入的 PTE
+    else bit0 功能开启
+        opt 当前为 global init 且 kernel 开关开启
+            HELP->>VMA: 添加 VM_PBHA_BIT0
+            Note over HELP,VMA: 不修改 mm.def_flags，不遍历其他页表
+        end
+        HELP->>VMA: 检查 VM_PBHA_BIT0
+        opt VMA 标志已设置
+            HELP->>HELP: pte_mkpbha() 设置本次 PTE 的 bit59
+        end
+        HELP-->>FAULT: 返回 PTE
+    end
+    FAULT->>PT: 安装本次页表项
 ```
 
 该辅助函数不直接设置 `mm->def_flags`，也不遍历 init 的全部已有页表。因此只能据具体 VMA 和页表判断策略，不能推出“init 及其所有后代的默认值都为 1”。procfs 禁止直接修改 global init 是入口权限规则，与这里的自动建表策略是两回事。
 
-### 5.6 权限、错误与观测
+### 5.7 权限与错误处理
 
 procfs 条目权限为 `0644`，通过文件权限及任务有效性检查约束访问；`prctl` 操作当前地址空间。函数级任务检查并未在两个入口完全统一，不能把 procfs 的全部限制视为公共接口保证。
 
@@ -516,7 +553,9 @@ procfs 条目权限为 `0644`，通过文件权限及任务有效性检查约束
 | 未启用时传入 mmap 扩展位 | 架构转换不设置对应 VMA 位；不能承诺 mmap 一定显式报错 |
 | mprotect 请求不被架构允许的属性 | `arch_validate_prot()` 可拒绝并返回 `-EINVAL` |
 
-观测接口应分层解读：
+### 5.8 观测接口：默认值、VMA 与页表
+
+观测接口分别报告默认策略、VMA 策略和页表属性，不能互相替代。
 
 | 接口 | 观测对象 |
 | --- | --- |
@@ -528,77 +567,32 @@ procfs 条目权限为 `0644`，通过文件权限及任务有效性检查约束
 
 pagemap 的 bit59 是用户可见记录格式中的扩展位；即使与硬件页表位号相同，也不能把整条 pagemap 记录视为原始 PTE。
 
-### 5.7 进程级修改为何需要三个层次
-
-进程级请求表达的是“该地址空间采用指定策略”。只改其中一层，会使新旧映射采用不同属性。因此更新由默认策略、现有 VMA 和现有页表三部分组成。
-
 ```mermaid
-flowchart TD
-    A[procfs 写入或 prctl 请求] --> B[校验请求并取得目标 mm]
-    B --> C[pbha_bit0_update_vma 获取 mmap 写锁]
-    C --> D[更新 mm 的 def_flags]
-    D --> E[遍历现有 VMA 设置或清除 VM_PBHA_BIT0]
-    E --> F[vma_set_page_prot 更新建表属性模板]
-    F --> G[MMU notifier 开始失效通知]
-    G --> H[walk_page_range 遍历已有映射]
-    H --> I{映射类别}
-    I -->|普通页| J[持有 PTE 锁更新 bit59]
-    I -->|THP| K[持有 PMD 锁更新 bit59]
-    I -->|尚未建立页表项| L[不分配页面 等待后续缺页]
-    J --> M[结束失效通知并刷新地址空间 TLB]
-    K --> M
-    L --> M
-    M --> N[释放 mmap 写锁并返回]
-```
-
-| 更新对象 | 生效对象 | 为什么需要 |
-| --- | --- | --- |
-| `mm->def_flags` | 后续新增 VMA | 新的 `mmap` 可以继承进程默认策略 |
-| `vm_flags` 与 `vm_page_prot` | 已有 VMA 中后续建立的映射 | 尚未访问的页面，以及需要重新建表的路径，有可读取的持久策略 |
-| 已有 leaf entry 与 TLB | 已经建立映射的页面 | 现有访问不一定再次缺页，必须主动更新属性并使旧转换失效 |
-
-图中为受支持映射的更新设计，未把所有特殊映射归入普通页。基线 walker 跳过 `VM_PFNMAP`，也没有 hugetlb 专用回调；其边界见第 5.5 节。基线按 mm 默认值提前返回的行为不代表所有 VMA 已经一致，设计上不能只凭默认值判断整个地址空间无需修改。
-
-### 5.8 mprotect：修改指定范围的 VMA 与已有页表
-
-`mmap()` 创建新 VMA；`mprotect()` 修改已有虚拟地址范围。地址范围已经有 VMA，但其中的页面可以尚未建立物理映射。两者都复用 VMA 保存 PBHA 策略，不要求为了设置属性提前分配物理页。
-
-本设计采用本次讨论确认的接口语义：**`mprotect()` 的 PBHA 标志与 READ、WRITE 一样，由本次 `prot` 参数重新指定；传入 `PROT_PBHA_BIT0` 则设置，省略则清除。** 它只影响指定范围，不改变 `mm->def_flags`。这与 `mmap()` 合入进程默认标志的规则不同。
-
-```mermaid
-flowchart TD
-    A[mprotect 指定地址范围与 prot] --> B[do_mprotect_pkey 检查参数和属性支持]
-    B --> C[VM_ARCH_CLEAR 清除旧 PBHA 标志 再按 prot 生成 newflags]
-    C --> D[mprotect_fixup 按范围拆分或合并 VMA]
-    D --> E[更新 vm_flags 和 vm_page_prot]
-    E --> F[change_protection 更新已有映射]
-    F --> G{页面类型}
-    G -->|普通页| H[pte_modify]
-    G -->|THP| I[pmd_modify]
-    G -->|hugetlb| J[huge_pte_modify]
-    I --> H
-    J --> H
-    H --> K[pte_modify 的 mask 包含 PTE_PBHA0 替换 bit59]
-    K --> L[沿用既有页表提交和 TLB 同步流程]
-    E -.-> M[尚未建立的映射在后续缺页时使用新属性]
-```
-
-这里的图表示目标设计，不表示首页基线已经实现全部步骤。落实设计需要把 `VM_PBHA_BIT0` 纳入旧 VMA 标志清除集合，并使 `pte_modify()` 的更新掩码包含 `PTE_PBHA0`。后者会被普通页、THP 和 hugetlb 的属性修改路径复用，不需要额外调用进程级全地址空间 walker。
-
-`pte_modify()` 只替换掩码指定的属性位，保留物理地址和其他应保留的状态；因此“已走到页表更新函数”并不保证 PBHA 被更新。基线遗漏 bit59 的掩码，是已有映射不同步的原因。
-
-采用省略即清除的语义会改变基线保留 PBHA 的行为：应用后续仅修改读写权限时，如需保持 PBHA，应继续传入 `PROT_PBHA_BIT0`。该兼容性变化是此项接口设计的一部分。
-
-### 5.9 观测接口与策略层次对应
-
-观测接口分别报告默认策略、VMA 策略和页表属性，不能互相替代。
-
-```mermaid
-flowchart LR
-    A[mm 默认策略] --> B[proc pid pbha_bit0 返回 0 或 1]
-    C[VMA 标志] --> D[smaps 的 VmFlags 显示 p0]
-    E[已有页表项] --> F[pte_pbha 或 pmd_pbha 提取 bit0]
-    F --> G[转换为 pagemap 记录的 bit59]
+sequenceDiagram
+    participant U as 观测程序
+    participant PROC as procfs 读取路径
+    participant MM as mm 与 VMA
+    participant PT as 页表
+    alt 读取 pbha_bit0
+        U->>PROC: 读取 /proc/pid/pbha_bit0
+        PROC->>MM: 查询 mm.def_flags
+        PROC-->>U: 返回默认值 0 或 1
+    else 读取 smaps
+        U->>PROC: 读取 /proc/pid/smaps
+        PROC->>MM: 查询各 VMA 的 vm_flags
+        PROC-->>U: 标志置位时在 VmFlags 输出 p0
+    else 读取 pagemap
+        U->>PROC: 读取目标虚拟地址对应记录
+        PROC->>PT: 遍历页表并判断映射类型
+        alt 普通页
+            PT-->>PROC: pte_to_pagemap_entry() 提取 pte_pbha()
+        else THP
+            PT-->>PROC: pagemap_pmd_range() 提取 pmd_pbha()
+        else hugetlb
+            Note over PROC,PT: 基线 pagemap_hugetlb_range() 漏导出 PBHA
+        end
+        PROC-->>U: 编码为 pagemap 记录，PBHA 使用 bit59
+    end
 ```
 
 `p0` 表示 VMA 设置了 PBHA bit0 标志，不表示属性值为零。pagemap 是独立的用户接口格式，需从不同类型的页表项提取属性后再编码，不能直接复制原始 64 位描述符。基线普通页和 THP 已有提取路径，`pagemap_hugetlb_range()` 缺少相应导出，不能把其返回的零当作硬件属性为零的依据。
@@ -622,50 +616,29 @@ flowchart LR
 
 对于 swap、迁移、THP 拆分/合并及映射权限变更，应保持最终属性与 VMA 策略一致。上述目标必须按各自路径验证，不能由几个缺页接入点推导为全部已覆盖。
 
-### 6.2 稳态访存流程
-
-```mermaid
-flowchart TD
-    A[CPU 执行内存访问] --> B{TLB 是否命中}
-    B -->|是| C[取得缓存的地址转换与属性]
-    B -->|否| D[硬件遍历页表]
-    D --> E[读取叶子项的物理地址与 PBHA]
-    E --> C
-    C --> F[按转换控制形成有效 PBHA]
-    F --> G[向内存子系统传递访问与属性]
-    G --> H[平台按 bit0 约定执行缓存策略]
-```
-
-在映射有效、无需缺页处理的情况下，访问不进入 `pbha.c`。TLB 缓存转换属性，所以修改内存中的 PTE 后必须完成相应失效流程，不能依靠“下次访问重新查表”保证立即生效。
-
-本设计不承诺每条指令都产生可在外部总线上观测到的事务；具体缓存层级是否消费 PBHA、何时向后级传递，属于芯片实现。
-
-### 6.3 正确性与性能约束
-
-1. PBHA 为同一物理内存的访问附加策略，不改变地址解析结果，也不隐式搬迁数据。
-2. 保留既有读写、执行、内存类型及共享属性约束；硬件不得借 PBHA 绕过访问权限。
-3. 页表和 TLB 属性变化必须与平台要求一致。基线没有专门为 bit0 切换增加数据缓存清理过程，应确认 performance-only 约定足以满足正确性。
-4. 未启用路径采用 static key 和编译期空实现减少附加判断。实际关闭态开销仍需基准验证。
-5. 进程级更新开销与 VMA 数、已遍历页表规模相关，并包含地址空间 TLB 刷新；不适合逐次内存访问或高频细粒度调度。
-6. 性能收益依赖工作集、并发负载和平台策略，不能仅由 bit59 设置成功推导出收益。
-
-### 6.4 从缺页建表到硬件消费属性
+### 6.2 缺页建表：将策略写入 leaf entry
 
 控制面保存策略后，缺页路径负责把策略写入实际映射。以普通匿名页首次写入为例，页面分配和物理地址选择沿用原机制，PBHA 作为附加属性进入页表项。
 
 ```mermaid
-flowchart TD
-    A[应用访问已有 VMA 中尚未映射的地址] --> B[缺页处理定位 VMA]
-    B --> C[do_anonymous_page 分配普通匿名页]
-    C --> D[mk_pte 使用物理页及 vm_page_prot 构造条目]
-    D --> E[maybe_mk_pbha_bit0 应用 VMA 的 bit0 策略]
-    E --> F[设置访问及读写等属性]
-    F --> G[取得页表锁并复核映射状态]
-    G --> H[set_pte_at 安装页表项]
-    H --> I[完成映射处理 返回用户态重试访问]
-    I --> J[硬件地址转换取得物理地址及有效 PBHA]
-    J --> K[需要向后级发送请求时携带对应属性]
-    K --> L[平台硬件按约定决定 HBM Cache 策略]
+sequenceDiagram
+    participant APP as 应用
+    participant FAULT as 缺页处理
+    participant VMA as VMA
+    participant PT as 页表
+    participant CPU as CPU 与 MMU
+    APP->>FAULT: 首次写入尚未建立映射的普通匿名页
+    FAULT->>VMA: 定位 VMA 并读取 vm_page_prot
+    FAULT->>FAULT: do_anonymous_page() 分配物理页
+    FAULT->>FAULT: mk_pte() 构造条目
+    FAULT->>VMA: maybe_mk_pbha_bit0() 应用 bit0 策略
+    FAULT->>FAULT: 设置读写、访问等属性
+    FAULT->>PT: 获取页表锁并复核映射状态
+    FAULT->>PT: set_pte_at() 安装页表项
+    FAULT-->>APP: 完成缺页处理，重试访问
+    APP->>CPU: 再次执行内存访问
+    CPU->>PT: 获取有效地址转换与 PBHA 属性
+    Note over CPU,PT: 后续访存按稳态路径执行
 ```
 
 图中限定为普通匿名页的首次写入；只读零页、文件页、COW 和大页走各自的建表分支。它们共享的设计原则是从 VMA 或相应映射策略生成最终描述符属性，不能因为路径不同而丢失 PBHA。
@@ -675,6 +648,48 @@ flowchart TD
 - **映射建立后**：普通访存不逐次调用 PBHA 软件代码。内核负责属性正确生成与同步，缓存策略的实际执行由硬件承担。
 
 HBM Cache 与 CPU 的 SRAM Cache 可以处于不同层次。PBHA bit0 的平台含义是 HBM Cache bypass，不意味着每次访存都绕过 L1/L2/L3 或直接访问 DDR。是否向后级发出事务、哪一模块消费属性，由具体芯片决定。本文没有获得目标平台 HHA 与 HBM 控制器的实现规格，因此不指定 PBHA 必须在哪个硬件模块消费，也不将其他型号的结构直接套用于目标平台。
+
+### 6.3 稳态访存：硬件消费属性
+
+```mermaid
+sequenceDiagram
+    participant CPU as CPU
+    participant TLB as TLB 与地址转换
+    participant PT as 页表
+    participant CACHE as CPU Cache
+    participant HW as 后级内存子系统
+    CPU->>TLB: 请求虚拟地址转换
+    alt TLB 命中
+        TLB-->>CPU: 物理地址及有效属性
+    else TLB 未命中
+        TLB->>PT: 硬件页表遍历
+        PT-->>TLB: leaf entry 的物理地址和 PBHA
+        TLB-->>CPU: 按转换控制形成有效属性
+    end
+    CPU->>CACHE: 访问数据
+    alt CPU Cache 满足请求
+        CACHE-->>CPU: 返回数据
+    else 需要后级访问
+        CACHE->>HW: 传递请求及有效 PBHA 属性
+        HW->>HW: 按平台约定处理 HBM Cache 策略及一致性
+        HW-->>CACHE: 返回数据
+        CACHE-->>CPU: 完成访问
+    end
+    Note over CPU,HW: 图示逻辑关系，不限定流水线时序或消费模块位置
+```
+
+在映射有效、无需缺页处理的情况下，访问不进入 `pbha.c`。TLB 缓存转换属性，所以修改内存中的 PTE 后必须完成相应失效流程，不能依靠“下次访问重新查表”保证立即生效。
+
+本设计不承诺每条指令都产生可在外部总线上观测到的事务；具体缓存层级是否消费 PBHA、何时向后级传递，属于芯片实现。
+
+### 6.4 正确性与性能约束
+
+1. PBHA 为同一物理内存的访问附加策略，不改变地址解析结果，也不隐式搬迁数据。
+2. 保留既有读写、执行、内存类型及共享属性约束；硬件不得借 PBHA 绕过访问权限。
+3. 页表和 TLB 属性变化必须与平台要求一致。基线没有专门为 bit0 切换增加数据缓存清理过程，应确认 performance-only 约定足以满足正确性。
+4. 未启用路径采用 static key 和编译期空实现减少附加判断。实际关闭态开销仍需基准验证。
+5. 进程级更新开销与 VMA 数、已遍历页表规模相关，并包含地址空间 TLB 刷新；不适合逐次内存访问或高频细粒度调度。
+6. 性能收益依赖工作集、并发负载和平台策略，不能仅由 bit59 设置成功推导出收益。
 
 ## 7. 虚拟化边界
 
