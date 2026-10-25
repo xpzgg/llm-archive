@@ -86,8 +86,8 @@ OOM Killer                         ← 最后兜底
 |------|------|
 | [todo.md](todo.md) | Radix Tree / XArray / Maple Tree 学习资料链接 |
 | [slub/](slub/) | SLUB 归档：笔记、sheaves 补充、分配/释放路径图、学习资料 |
+| [glibc/](glibc/README.md) | 用户态 glibc malloc 的架构图与阅读资料，衔接 malloc、brk/mmap 与内核 MM |
 | [mm-iommu-learning-guide.md](mm-iommu-learning-guide.md) | IOMMU 相关学习路径 |
-| [mpi-latency-spike-initramfs.md](mpi-latency-spike-initramfs.md) | MPI 延迟问题排查案例（MM 实战） |
 | [arm64-page-fault.drawio](arm64-page-fault.drawio) | Page fault 流程图（可视化） |
 | DDI0487Mb_toc.txt | ARM 架构手册目录（查 spec 用） |
 

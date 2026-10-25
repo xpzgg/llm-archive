@@ -71,22 +71,22 @@ This repository is a personal technical archive. It contains long-lived notes, d
 
 | Path | Topic |
 |---|---|
-| `notes/linux-kernel/` | Linux kernel notes, split by subsystem: `rcu/`, `mm/`, `interrupt/`, `os-boot/`, `gpu/`, `general/`. |
+| `notes/linux-kernel/` | General track: Linux kernel notes split by subsystem: `rcu/`, `mm/`, `iommu/`, `interrupt/`, `pci/`, `gpu/`, `general/`. Chip features tied to one subsystem (MPAM, TLBID…) stay in that subsystem's folder. |
 | `notes/linux-kernel/rcu/` | RCU internals: overview, QS reporting, trace events, API use, `rcu_sync`, and subsystem breakdowns. |
-| `notes/linux-kernel/mm/` | Memory-management topics such as boot memory init, OOM, IOMMU, Maple Tree, and page-fault diagrams. |
+| `notes/linux-kernel/mm/` | Memory-management topics such as boot memory init, OOM, Maple Tree, MMU features, MPAM, and page-fault diagrams. |
+| `notes/linux-kernel/iommu/` | IOMMU / SMMU. |
 | `notes/linux-kernel/interrupt/` | Interrupt architecture and ARM-specific interrupt/SDEI material. |
-| `notes/linux-kernel/os-boot/` | Boot and reboot flows. |
 | `notes/linux-kernel/gpu/` | GPU-related notes, currently AMD-focused. |
 | `notes/linux-kernel/general/` | Temporary or general kernel notes. Clean up or promote durable material when it becomes stable. |
+| `notes/chip-kernel/` | Specialized track: chip software–CPU / software–hardware co-design. Holds `chip-kernel-roadmap.md` (the capability roadmap) and cross-cutting topics: `platform-boot/` (boot, bring-up, reboot) and `computer-architecture/` (computer architecture study notes). |
 | `notes/ai-infra/` | AI infrastructure notes: `ascendc/`, `pytorch/`, `transformer/`, `vllm/`. |
-| `notes/computer-architecture/` | Computer architecture study notes. |
-| `notes/known-concepts.md` | Index of concepts already understood by the user. Check this before writing explanations. |
+| `notes/known-concepts.md` | Mastery index: the L1 / L2 / L3 level reached per topic. Check it before explaining; skip what the level already covers and update it after a level is finished. |
 
 When editing `notes/`, follow the local rule: explain What, Why, How, and So What as needed, but do not force every article into a rigid template.
 
 ## Where New Work Goes
 
-- Put durable technical understanding in `notes/<topic>/` (kernel topics under `notes/linux-kernel/<subsystem>/`).
+- Put durable technical understanding in `notes/<topic>/` (kernel subsystems under `notes/linux-kernel/<subsystem>/`; cross-cutting chip co-design topics under `notes/chip-kernel/`).
 - Put downstream runbooks or issue triage guides in `docs/`.
 - Put investigation output, CVE writeups, diagrams, and generated reports in `results/`.
 - Put reusable parsing or analysis helpers in `scripts/`.

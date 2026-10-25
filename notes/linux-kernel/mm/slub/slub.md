@@ -105,3 +105,12 @@ kmem_cache_free（:3825）
 - Christoph Lameter（SLUB 作者）"Slab allocators in the Linux Kernel: SLAB, SLOB, SLUB"，LinuxCon 2014：<https://events.static.linuxfound.org/sites/events/files/slides/slaballocators.pdf>
 - LWN "The SLUB allocator"（2007）：<https://lwn.net/Articles/229984/>
 - Oracle "Linux SLUB Allocator Internals and Debugging" 四连篇（2022，v5.19 ≈ v6.6 架构）：<https://blogs.oracle.com/linux/linux-slub-allocator-internals-and-debugging-1>
+
+## 要点速记
+
+- **分层结构** — `kmem_cache`（一类对象的配置，本身不存对象）→ `kmem_cache_cpu`（per-CPU 分配状态，无锁快路径）→ `kmem_cache_node.partial`（per-node 共享层，`list_lock`）→ buddy。一张 slab 任意时刻只处于三种位置之一：某 CPU 的活跃 slab（frozen）、挂在某条 partial 链表上、全满不在任何链表上。
+- **两条 freelist** — `cpu_slab->freelist` 是本 CPU 私有链；`slab->freelist` 收其他 CPU 释放回来的对象。frozen=1 表示该 slab 是某 CPU 的活跃 slab；deactivate 时两链合并。
+- **快路径并发设计** — 不禁抢占；`this_cpu_cmpxchg` 同时校验 freelist+tid（tid 防 ABA、检测抢占/中断/迁移干扰），失败重试。不变量：只有本 CPU 上执行的代码会碰本 CPU 的 `cpu_slab->freelist`。PREEMPT_RT 下退化为 local_lock。
+- **`struct slab`** — 复用首页 page 描述符，零额外内存；freelist 与 inuse/objects/frozen 打包成单字，供其他 CPU 释放时双字 cmpxchg；满的 slab 不在任何链表上。
+- **布局围绕原子操作单元** — freelist+tid、freelist+counters、oo(order+objects) 三处字段打包。
+- **释放路径分流** — 判据只有一个：所属 slab 是否本 CPU 活跃 slab。是 → push `c->freelist`（与分配 pop 对称）；否 → `__slab_free` 挂 `slab->freelist`，按 was_frozen / 释放前全满 / 释放后全空三分支处理。cpu partial 唯一入口在释放路径（`put_cpu_partial`），出口在分配路径。
