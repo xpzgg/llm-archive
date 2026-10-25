@@ -176,3 +176,13 @@ mmap(fd, ..., MAP_SHARED)
 - **`-ENOSPC` 即 tmpfs"磁盘满"**：sparse 映射上体现为 SIGBUS 而非 OOM。
 - **major fault = 缺页需要磁盘 I/O**（换入读盘时标记）；`maj_flt` 高说明 shmem 页在内存与 swap 间颠簸，是内存不足信号。
 - **userfaultfd 不分配页**：`handle_userfault` 只挂起 fault 线程并通知监听线程；分配+填数据推迟到 `UFFDIO_COPY` ioctl（`shmem_mfill_atomic_pte`），内容来源换成用户态 buffer。
+
+## 要点速记
+
+- **定位** — 无后备设备的文件系统，给"可共享的匿名内存"一个 inode 身份。tmpfs、/dev/shm、SysV shm、memfd、`MAP_SHARED|ANONYMOUS` 全是它。
+- **设计本质：page cache 反转** — XArray 里是真身不是缓存，无磁盘可写回；回收时换出到 swap，swap 扮演普通文件块设备的角色。
+- **三态槽位** — `address_space->i_pages` 的槽位：folio 指针（在内存）/ swap entry（已换出，`xa_mk_value` 编码）/ 空（空洞）。所有取页路径收敛到 `shmem_get_folio_gfp`，按 `sgp_type` 意图决定空洞是否分配。
+- **两张世界** — 进程侧（VMA/PTE）与文件侧（inode/XArray）靠 `vm_fault` 工单交接：shmem 填 `vmf->page`，通用层 `finish_fault` 填 PTE。PTE 与 XArray 槽位是指向同一物理页的两条独立引用。
+- **`__folio_set_swapbacked`** — shmem 页挂 anon LRU、回收走 swap 的判据，page cache 反转落到代码就是这一个标志。
+- **三态转换** — 空洞→指针（fault 分配）、指针→swap entry（`shmem_writepage` 换出）、swap entry→指针（`shmem_swapin_folio` 换入，先查 swap cache，读盘记 major fault）。
+- **限额与故障语义** — `max_blocks`/`used_blocks` 是 tmpfs `size=` / docker `--shm-size` 落点；超限 `-ENOSPC` → SIGBUS（容器里 DataLoader 的 `Bus error`）；无 swap 时 shmem 页钉死不可回收。
