@@ -1,0 +1,1140 @@
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index 77c65f16e2a7..8492aedf600a 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -6424,6 +6424,48 @@ the capability to be present.
+ 
+ `flags` must currently be zero.
+ 
++4.145 KVM_ARM_GET_VDOMAIN_NUM
++------------------------------
++
++:Capability: KVM_CAP_ARM_TLBIDOMAIN
++:Architectures: arm64
++:Type: vm ioctl
++:Parameters: struct kvm_arm_get_vdomain (out)
++:Returns: 0 on success, < 0 on error
++
++Parameters are specified via the following structure::
++
++	struct kvm_arm_get_vdomain {
++		__u8 max_vdomains;
++	};
++
++The ``max_vdomains`` field is the maximum number of vDomains supported
++by the virtual TLBID implementation. This value is derived from
++TLBIDIDR_EL1.NVIS and is capped at 32.
++
++4.146 KVM_ARM_VCPU_SET_VDOMAIN
++------------------------------
++
++:Capability: KVM_CAP_ARM_TLBIDOMAIN
++:Architectures: arm64
++:Type: vcpu ioctl
++:Parameters: struct kvm_arm_set_vdomain (in)
++:Returns: 0 on success, < 0 on error
++
++This ioctl allows KVM to obtain TLBI Domain of Guest.
++
++Parameters are specified via the following structure::
++
++	struct kvm_arm_set_vdomain {
++		__u32 vdomain_bitmap;
++		__u8 num_vdomains;
++	};
++
++The ``vdomain_bitmap`` field is a bitmap, where '1' indicates that vDomain
++includes this vCPU. For example, ``vCPU0:  vdomain_bitmap=0b1011`` indicates
++that vCPU0 included in vDomain(0, 1, 3).
++
++The ``num_vdomains`` field is the number of vDomains.
+ 
+ 5. The kvm_run structure
+ ========================
+@@ -8218,6 +8260,22 @@ Used to configure and set up the memory for a Realm. The available actions are:
+                                   enter the realm until it has been activated.
+ ================================= =============================================
+ 
++7.39 KVM_CAP_ARM_TLBIDOMAIN
++-------------------------------------
++
++:Architectures: arm64
++:Target: VM
++:Parameters: None
++:Returns: 0 on success, negative value on error
++
++This capability enables TLBID virtualization, which optimizes tlbi broadcast
++range to avoid unnecessary broadcasts.
++
++When this capability is enabled, KVM can obtain the vDomain bitmaps of VM. When
++a vCPU is loaded, KVM writes the mapping between the vDomain and the pDomain
++into the VTLBID(n). If guest enabled TLBID, hardware will convert vDomain id to
++pDomain id for TLBI broadcast.
++
+ 8. Other capabilities.
+ ======================
+ 
+diff --git a/arch/arm64/include/asm/kvm_host.h b/arch/arm64/include/asm/kvm_host.h
+index 07e8144d55f7..42a9927f7a4b 100644
+--- a/arch/arm64/include/asm/kvm_host.h
++++ b/arch/arm64/include/asm/kvm_host.h
+@@ -45,6 +45,20 @@
+ #define KVM_VCPU_MAX_FEATURES 9
+ #define KVM_VCPU_VALID_FEATURES	(BIT(KVM_VCPU_MAX_FEATURES) - 1)
+ 
++#define NIS_RANGE_MIN_1_8 1
++#define NIS_RANGE_MAX_1_8 8
++#define NIS_RANGE_MIN_9_16 9
++#define NIS_RANGE_MAX_9_16 16
++#define VTLBID_TD_WIDTH_NIS_1_8 8
++#define VTLBID_TD_WIDTH_NIS_9_16 16
++#define VTLBID_EL2_WIDTH 64
++/*
++ * Cap the supported NVIS so per-vDomain bitmaps have a compile-time
++ * upper bound; the hardware field itself is 5 bits wide.
++ */
++#define KVM_VTLBID_MAX_NVIS		5
++#define KVM_VTLBID_MAX_VDOMAINS		(1U << KVM_VTLBID_MAX_NVIS)
++
+ #define KVM_REQ_SLEEP \
+ 	KVM_ARCH_REQ_FLAGS(0, KVM_REQUEST_WAIT | KVM_REQUEST_NO_WAKEUP)
+ #define KVM_REQ_IRQ_PENDING	KVM_ARCH_REQ(1)
+@@ -57,6 +71,7 @@
+ #define KVM_REQ_RELOAD_TLBI_DVMBM	KVM_ARCH_REQ(8)
+ #define KVM_REQ_RELOAD_WFI_TRAPS       KVM_ARCH_REQ(9)
+ #define KVM_REQ_RELOAD_TIMER_EARLY_INJECT KVM_ARCH_REQ(10)
++#define KVM_REQ_RELOAD_VTLBID	KVM_ARCH_REQ(11)
+ 
+ #define KVM_DIRTY_LOG_MANUAL_CAPS   (KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | \
+ 				     KVM_DIRTY_LOG_INITIALLY_SET)
+@@ -208,6 +223,40 @@ struct kvm_protected_vm {
+ 	struct kvm_hyp_memcache teardown_mc;
+ };
+ 
++struct vcpu_tlbid_data {
++	/* Node in per-pCPU vCPU list of tlbidomain */
++	struct list_head pcpu_node;
++	/* Store vDomain bitmap, indexed by vCPU ID */
++	u32 vdomain_bitmap;
++	/* Record the last pCPU where vCPU was running, indexed by vCPU ID */
++	int last_pcpu;
++};
++
++struct tlbidomain {
++	/* Using xarray to dynamically allocate vCPU-related TLBID info */
++	struct xarray vcpu_data_array;
++	/* The number of vDomains */
++	int num_domains;
++	/* Mapping of pDomain to vDomain, indexed by vDomain ID */
++	int *domain_map;
++	/* Record the bitmap of pCPUs mapped to vDomain, indexed by vDomain ID */
++	cpumask_var_t *vdomain_cpumasks;
++	/* Whether virt-TLBID is enabled by KVM */
++	bool kvm_tlbid_enabled;
++	/* Whether virt-TLBID is enabled by Guest */
++	bool guest_tlbid_enabled;
++	/* TLBIDIDR.NVIS */
++	u8 nvis;
++	/* TLBIDIDR.NIS */
++	u8 nis;
++	/* Guest-visible TLBIDIDR value (NIS/NOS carry virtual domain counts) */
++	u64 tlbididr_val;
++	/* Used to prevent concurrent modifications to the domain mapping. */
++	spinlock_t tlbid_lock;
++	/* Per-pCPU list of vCPUs whose last_pcpu equals this pCPU */
++	struct list_head *pcpu_vcpu_list;
++};
++
+ struct kvm_arch {
+ 	struct kvm_s2_mmu mmu;
+ 
+@@ -332,6 +381,10 @@ struct kvm_arch {
+ 	KABI_EXTEND(u64 midr_el1)
+ 	KABI_EXTEND(u64 revidr_el1)
+ 	KABI_EXTEND(u64 aidr_el1)
++
++#ifdef CONFIG_KVM_ARM_VTLBID
++	struct tlbidomain tlbidomain;
++#endif
+ };
+ 
+ struct kvm_vcpu_fault_info {
+diff --git a/arch/arm64/include/uapi/asm/kvm.h b/arch/arm64/include/uapi/asm/kvm.h
+index 93de3f019e5b..99c0e43c43dd 100644
+--- a/arch/arm64/include/uapi/asm/kvm.h
++++ b/arch/arm64/include/uapi/asm/kvm.h
+@@ -253,6 +253,8 @@ struct kvm_arm_counter_offset {
+ 
+ #define ARM64_SYS_REG(...) (__ARM64_SYS_REG(__VA_ARGS__) | KVM_REG_SIZE_U64)
+ 
++#define KVM_REG_ARM_ID_AA64MMFR4_EL1 ARM64_SYS_REG(3, 0, 0, 7, 4)
++
+ /* Physical Timer EL0 Registers */
+ #define KVM_REG_ARM_PTIMER_CTL		ARM64_SYS_REG(3, 3, 14, 2, 1)
+ #define KVM_REG_ARM_PTIMER_CVAL		ARM64_SYS_REG(3, 3, 14, 2, 2)
+diff --git a/arch/arm64/kvm/Kconfig b/arch/arm64/kvm/Kconfig
+index 689d32b140b7..2a71109ce082 100644
+--- a/arch/arm64/kvm/Kconfig
++++ b/arch/arm64/kvm/Kconfig
+@@ -145,4 +145,16 @@ config VIRT_TIMER_EARLY_INJECT
+ 	  The hypervisor can control the early injection latency via
+ 	  the module parameter: timer_early_inject_ns
+ 
++config KVM_ARM_VTLBID
++	bool "Virtual TLBID support for KVM guests"
++	depends on KVM && ARM64_TLBID
++	default n
++	help
++	  Enable virtualization of FEAT_TLBID so that each KVM guest can
++	  use TLBI Domains independently of the host. The host TLBID
++	  hardware is partitioned per-VM through VTLBID_EL2 registers
++	  managed on the vCPU load/put path.
++
++	  If unsure, say N.
++
+ endif # VIRTUALIZATION
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 324553fea612..d79ec594e06f 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -43,6 +43,7 @@
+ #include <asm/kvm_rme.h>
+ #include <asm/sections.h>
+ #include <asm/kvm_tmi.h>
++#include <asm/tlbid.h>
+ #include <kvm/arm_hypercalls.h>
+ #include <kvm/arm_pmu.h>
+ #include <kvm/arm_psci.h>
+@@ -50,6 +51,7 @@
+ static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
+ 
+ #include "hisilicon/hisi_virt.h"
++#include "sys_regs.h"
+ 
+ DEFINE_STATIC_KEY_FALSE(kvm_rme_is_available);
+ 
+@@ -319,6 +321,111 @@ static int kvm_arm_default_max_vcpus(void)
+ 	return vgic_present ? kvm_vgic_get_max_vcpus() : KVM_MAX_VCPUS;
+ }
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static int kvm_arm_init_tlbidomain(struct kvm *kvm)
++{
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++	int i, max_vdomains;
++	u64 tlbididr;
++
++	if (!system_supports_tlbid())
++		return 0;
++
++	tlbididr = read_sysreg_s(SYS_TLBIDIDR_EL1);
++
++	vdomain->nis = FIELD_GET(TLBIDIDR_EL1_NIS_MASK, tlbididr);
++	vdomain->nvis = min_t(u8, FIELD_GET(TLBIDIDR_EL1_NVIS_MASK, tlbididr),
++			      KVM_VTLBID_MAX_NVIS);
++	vdomain->num_domains = -1;
++	/*
++	 * Guest-visible TLBIDIDR: the NIS/NOS fields carry the virtual
++	 * domain counts (NVIS/NVOS), since the guest uses vDomains.
++	 */
++	vdomain->tlbididr_val = FIELD_PREP(TLBIDIDR_EL1_NIS_MASK, vdomain->nvis) |
++				FIELD_PREP(TLBIDIDR_EL1_NOS_MASK,
++					   FIELD_GET(TLBIDIDR_EL1_NVOS_MASK, tlbididr));
++	max_vdomains = 1 << vdomain->nvis;
++
++	kvm_info("TLBIDIDR: 0x%llx, NIS: %d, NVIS: %d\n", tlbididr, vdomain->nis, vdomain->nvis);
++
++	xa_init(&vdomain->vcpu_data_array);
++
++	vdomain->domain_map = kcalloc(max_vdomains, sizeof(*vdomain->domain_map),
++				      GFP_KERNEL);
++	if (!vdomain->domain_map)
++		goto destroy_vcpu_data_array;
++
++	vdomain->vdomain_cpumasks = kcalloc(max_vdomains, sizeof(cpumask_var_t),
++				 GFP_KERNEL);
++	if (!vdomain->vdomain_cpumasks)
++		goto free_domain_map;
++
++	for (i = 0; i < max_vdomains; i++) {
++		if (!alloc_cpumask_var(&vdomain->vdomain_cpumasks[i], GFP_KERNEL))
++			goto free_vdomain_cpumasks;
++		cpumask_clear(vdomain->vdomain_cpumasks[i]);
++	}
++
++	for (i = 0; i < max_vdomains; i++)
++		vdomain->domain_map[i] = -1;
++
++	spin_lock_init(&vdomain->tlbid_lock);
++
++	vdomain->pcpu_vcpu_list = kcalloc(nr_cpu_ids,
++				sizeof(*vdomain->pcpu_vcpu_list), GFP_KERNEL);
++	if (!vdomain->pcpu_vcpu_list)
++		goto free_vdomain_cpumasks;
++
++	for (i = 0; i < nr_cpu_ids; i++)
++		INIT_LIST_HEAD(&vdomain->pcpu_vcpu_list[i]);
++
++	/* Enable vTLBID only after all resources are allocated. */
++	vdomain->kvm_tlbid_enabled = true;
++
++	return 0;
++
++free_vdomain_cpumasks:
++	while (--i >= 0)
++		free_cpumask_var(vdomain->vdomain_cpumasks[i]);
++	kfree(vdomain->vdomain_cpumasks);
++free_domain_map:
++	kfree(vdomain->domain_map);
++destroy_vcpu_data_array:
++	xa_destroy(&vdomain->vcpu_data_array);
++
++	kvm_err("vTLBID init failed with -ENOMEM, feature disabled\n");
++	return -ENOMEM;
++}
++
++static void free_tlbid_vdomain(struct kvm *kvm)
++{
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++	struct vcpu_tlbid_data *data;
++	int i, max_vdomains;
++	unsigned long index;
++
++	if (!vdomain->kvm_tlbid_enabled)
++		return;
++
++	max_vdomains = 1 << vdomain->nvis;
++
++	kfree(vdomain->domain_map);
++
++	for (i = 0; i < max_vdomains; i++)
++		free_cpumask_var(vdomain->vdomain_cpumasks[i]);
++	kfree(vdomain->vdomain_cpumasks);
++
++	kfree(vdomain->pcpu_vcpu_list);
++
++	xa_for_each(&vdomain->vcpu_data_array, index, data)
++		kfree(data);
++	xa_destroy(&vdomain->vcpu_data_array);
++}
++#else
++static inline int kvm_arm_init_tlbidomain(struct kvm *kvm) { return 0; }
++static inline void free_tlbid_vdomain(struct kvm *kvm) { }
++#endif
++
+ /**
+  * kvm_arch_init_vm - initializes a VM data structure
+  * @kvm:	pointer to the KVM struct
+@@ -395,6 +502,8 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
+ 			goto err_free_cpumask;
+ 	}
+ 
++	kvm_arm_init_tlbidomain(kvm);
++
+ 	return 0;
+ 
+ err_free_cpumask:
+@@ -432,6 +541,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
+ 
+ 	kvm_arm_teardown_hypercalls(kvm);
+ 	kvm_destroy_realm(kvm);
++	free_tlbid_vdomain(kvm);
+ }
+ 
+ #ifdef CONFIG_ARM64_HISI_IPIV
+@@ -584,6 +694,12 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 			r = 0;
+ 		break;
+ #endif
++	case KVM_CAP_ARM_TLBIDOMAIN:
++		if (IS_ENABLED(CONFIG_KVM_ARM_VTLBID) && system_supports_tlbid())
++			r = 1;
++		else
++			r = 0;
++		break;
+ 	case KVM_CAP_ARM_RME:
+ 		r = static_key_enabled(&kvm_rme_is_available);
+ 		break;
+@@ -746,6 +862,268 @@ static void update_steal_time(struct kvm_vcpu *vcpu)
+ }
+ #endif
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static bool is_vcpu_in_vdomain(u32 vdomain_bitmap, int vdomain_idx)
++{
++	return vdomain_bitmap & BIT(vdomain_idx);
++}
++
++static int update_domain_map(struct kvm_vcpu *vcpu, int vdomain_idx,
++				   int last_pcpu, bool clear_flag)
++{
++	struct tlbidomain *vdomain = &vcpu->kvm->arch.tlbidomain;
++	int pdomain = vdomain->domain_map[vdomain_idx];
++	cpumask_var_t new_cpus;
++
++	cpumask_copy(new_cpus, vdomain->vdomain_cpumasks[vdomain_idx]);
++
++	if (unlikely(pdomain == -1)) {
++		cpumask_set_cpu(vcpu->cpu, new_cpus);
++		goto update_mask;
++	}
++
++	if (last_pcpu != -1 && clear_flag) {
++		/* remove old_cpu, not need to do so when first load */
++		if (cpumask_test_cpu(last_pcpu, new_cpus))
++			cpumask_clear_cpu(last_pcpu, new_cpus);
++	}
++
++	cpumask_set_cpu(vcpu->cpu, new_cpus);
++
++update_mask:
++	cpumask_copy(vdomain->vdomain_cpumasks[vdomain_idx], new_cpus);
++	return pick_best_domain(vdomain->vdomain_cpumasks[vdomain_idx]);
++}
++
++static void vtlbidn_clear_set_s(int idx, u64 clear, u64 set)
++{
++	switch (idx) {
++	case 0:
++		sysreg_clear_set_s(SYS_VTLBID0_EL2, clear, set);
++		break;
++	case 1:
++		sysreg_clear_set_s(SYS_VTLBID1_EL2, clear, set);
++		break;
++	case 2:
++		sysreg_clear_set_s(SYS_VTLBID2_EL2, clear, set);
++		break;
++	case 3:
++		sysreg_clear_set_s(SYS_VTLBID3_EL2, clear, set);
++		break;
++	default:
++		WARN_ON_ONCE(1);
++	}
++}
++
++static void kvm_arm_update_tlbid_map(struct tlbidomain *vdomain)
++{
++	int i, pdomain, vtlbid_idx, offset;
++	int pdomain_bits, nis = vdomain->nis;
++	int max_vdomains = 1 << vdomain->nvis;
++	u64 clear, set;
++
++	if (nis >= NIS_RANGE_MIN_1_8 && nis <= NIS_RANGE_MAX_1_8)
++		pdomain_bits = VTLBID_TD_WIDTH_NIS_1_8;
++	else if (nis >= NIS_RANGE_MIN_9_16 && nis <= NIS_RANGE_MAX_9_16)
++		pdomain_bits = VTLBID_TD_WIDTH_NIS_9_16;
++
++	for (i = 0; i < max_vdomains; i++) {
++		pdomain = vdomain->domain_map[i];
++		if (pdomain == -1) {
++			if (vdomain->domain_map[0] != -1)
++				pdomain = vdomain->domain_map[0];
++			else
++				pdomain = 0;
++		}
++
++		vtlbid_idx = i * pdomain_bits / VTLBID_EL2_WIDTH;
++		offset = i * pdomain_bits % VTLBID_EL2_WIDTH;
++
++		clear = GENMASK(offset + pdomain_bits - 1, offset);
++		set = pdomain << offset;
++
++		vtlbidn_clear_set_s(vtlbid_idx, clear, set);
++	}
++}
++
++static void kvm_vcpu_reload_tlbid(struct kvm *kvm)
++{
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++
++	if (WARN_ON_ONCE(!vdomain->kvm_tlbid_enabled))
++		return;
++
++	preempt_disable();
++	kvm_arm_update_tlbid_map(vdomain);
++	preempt_enable();
++}
++
++static inline void set_tlbididr_trap(void)
++{
++	u64 val;
++
++	val = read_sysreg_s(SYS_HFGRTR2_EL2);
++	val &= ~HFGRTR2_EL2_nTLBIDIDR_EL1_MASK;
++	write_sysreg_s(val, SYS_HFGRTR2_EL2);
++	isb();
++}
++
++static void kvm_tlbidomain_vcpu_load(struct kvm_vcpu *vcpu)
++{
++	struct kvm *kvm = vcpu->kvm;
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++	int max_vdomains = 1 << vdomain->nvis;
++	DECLARE_BITMAP(clear_bits, KVM_VTLBID_MAX_VDOMAINS);
++	struct vcpu_tlbid_data *current_data, *other_data;
++	bool domain_map_changed = false;
++	int i, old_map;
++
++	/*
++	 * If we support tlbid, but user does not enable it, we can do
++	 * vdomain0 -> pdomainN as well by default.
++	 */
++	if (!vdomain->kvm_tlbid_enabled)
++		return;
++
++	set_tlbididr_trap();
++
++	current_data = xa_load(&vdomain->vcpu_data_array, vcpu->vcpu_idx);
++	if (WARN_ON_ONCE(!current_data))
++		return;
++
++	/*
++	 * Check if vCPU thread will move to another pCPU. Even when
++	 * staying on the same pCPU, another vCPU may have reprogrammed
++	 * the per-pCPU VTLBIDn registers in between, so reprogram them
++	 * before re-entering the guest.
++	 */
++	if (likely(vcpu->cpu == current_data->last_pcpu)) {
++		spin_lock(&vdomain->tlbid_lock);
++		kvm_arm_update_tlbid_map(vdomain);
++		spin_unlock(&vdomain->tlbid_lock);
++		return;
++	}
++
++	spin_lock(&vdomain->tlbid_lock);
++
++	bitmap_zero(clear_bits, max_vdomains);
++
++	/*
++	 * Remove current vCPU from its last_pcpu list and compute clear_bits
++	 * only when there was a previous pCPU. On first load (last_pcpu == -1),
++	 * no previous pCPU needs to be cleared from vdomain_cpumask.
++	 */
++	if (current_data->last_pcpu != -1) {
++		list_del_init(&current_data->pcpu_node);
++
++		/*
++		 * Iterate only vCPUs that share the same last_pcpu to compute
++		 * clear_bits. This is O(1) in the typical case since most pCPUs
++		 * host only one vCPU at a time.
++		 */
++		bitmap_fill(clear_bits, max_vdomains);
++		list_for_each_entry(other_data,
++				    &vdomain->pcpu_vcpu_list[current_data->last_pcpu],
++				    pcpu_node) {
++			bitmap_andnot(clear_bits, clear_bits,
++				(unsigned long *)&other_data->vdomain_bitmap, max_vdomains);
++		}
++	}
++	trace_kvm_tlbid_vcpu_info(vcpu->vcpu_idx, vcpu->cpu,
++				  current_data->last_pcpu,
++				  current_data->vdomain_bitmap);
++
++	if (!vdomain->guest_tlbid_enabled) {
++		old_map = vdomain->domain_map[0];
++
++		/*
++		 * If QEMU is not configured with vdomains, only vDomain0 needs
++		 * to be mapped.
++		 */
++		vdomain->domain_map[0] = update_domain_map(vcpu,
++							   0,
++							   current_data->last_pcpu,
++							   test_bit(0, clear_bits));
++		trace_kvm_tlbid_domain_mapping(0,
++					       vdomain->vdomain_cpumasks[0],
++					       vdomain->domain_map[0]);
++
++		if (vdomain->domain_map[0] == old_map)
++			goto unlock;
++	} else {
++		/*
++		 * If QEMU is configured with vdomains, all vdomains need to be
++		 * mapped. For all vdomains which includes this vCPU, check if
++		 * vdomain map should be changed as well.
++		 */
++		for (i = 0; i < vdomain->num_domains; i++) {
++			if (!is_vcpu_in_vdomain(current_data->vdomain_bitmap, i))
++				continue;
++
++			old_map = vdomain->domain_map[i];
++			vdomain->domain_map[i] = update_domain_map(vcpu,
++								   i,
++								   current_data->last_pcpu,
++								   test_bit(i, clear_bits));
++			trace_kvm_tlbid_domain_mapping(i,
++						       vdomain->vdomain_cpumasks[i],
++						       vdomain->domain_map[i]);
++
++			if (vdomain->domain_map[i] != old_map)
++				domain_map_changed = true;
++		}
++
++		if (!domain_map_changed)
++			goto unlock;
++	}
++
++	kvm_flush_remote_tlbs(kvm);
++
++	/*
++	 * Before this vcpu load, kick other vCPUs out, so maps for other vCPUs
++	 * will be updated during vCPU load.
++	 *
++	 * Add KVM_REQUEST_WAIT to make sure vCPU is out.
++	 */
++	kvm_make_all_cpus_request(kvm, KVM_REQ_RELOAD_VTLBID | KVM_REQUEST_WAIT);
++
++unlock:
++	/* update tlbid hardware map register */
++	kvm_arm_update_tlbid_map(vdomain);
++
++	current_data->last_pcpu = vcpu->cpu;
++	list_add_tail(&current_data->pcpu_node,
++		      &vdomain->pcpu_vcpu_list[vcpu->cpu]);
++
++	spin_unlock(&vdomain->tlbid_lock);
++}
++
++static inline void clear_tlbididr_trap(void)
++{
++	u64 val;
++
++	val = read_sysreg_s(SYS_HFGRTR2_EL2);
++	val |= HFGRTR2_EL2_nTLBIDIDR_EL1_MASK;
++	write_sysreg_s(val, SYS_HFGRTR2_EL2);
++	isb();
++}
++
++static void kvm_tlbidomain_vcpu_put(struct kvm_vcpu *vcpu)
++{
++	struct kvm *kvm = vcpu->kvm;
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++
++	if (!vdomain->kvm_tlbid_enabled)
++		return;
++
++	clear_tlbididr_trap();
++}
++#else
++static inline void kvm_vcpu_reload_tlbid(struct kvm *kvm) { }
++static inline void kvm_tlbidomain_vcpu_load(struct kvm_vcpu *vcpu) { }
++static inline void kvm_tlbidomain_vcpu_put(struct kvm_vcpu *vcpu) { }
++#endif
++
+ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ {
+ 	struct kvm_s2_mmu *mmu;
+@@ -801,6 +1179,8 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ 
+ 	kvm_tlbi_dvmbm_vcpu_load(vcpu);
+ 
++	kvm_tlbidomain_vcpu_load(vcpu);
++
+ 	/*
+ 	 * When pv_preempted is changed from enabled to disabled, preempted
+ 	 * state will not be updated in kvm_arch_vcpu_put/load. So we must
+@@ -839,6 +1219,8 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
+ 
+ 	kvm_tlbi_dvmbm_vcpu_put(vcpu);
+ 
++	kvm_tlbidomain_vcpu_put(vcpu);
++
+ 	if (kvm_arm_is_pvsched_valid(&vcpu->arch) && pv_preempted_enable)
+ 		kvm_update_pvsched_preempted(vcpu, 1);
+ }
+@@ -1204,6 +1586,9 @@ static int check_vcpu_requests(struct kvm_vcpu *vcpu)
+ 		if (kvm_check_request(KVM_REQ_RELOAD_TLBI_DVMBM, vcpu))
+ 			kvm_hisi_reload_lsudvmbm(vcpu->kvm);
+ 
++		if (kvm_check_request(KVM_REQ_RELOAD_VTLBID, vcpu))
++			kvm_vcpu_reload_tlbid(vcpu->kvm);
++
+ 		if (kvm_check_request(KVM_REQ_RELOAD_WFI_TRAPS, vcpu)) {
+ 			if (single_task_running())
+ 				vcpu_clear_wfx_traps(vcpu);
+@@ -1765,6 +2150,52 @@ static int kvm_vcpu_set_target(struct kvm_vcpu *vcpu,
+ 	return kvm_reset_vcpu(vcpu);
+ }
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static int kvm_arm_tlbidomain_vcpu_init(struct kvm_vcpu *vcpu)
++{
++	struct tlbidomain *vdomain;
++	struct vcpu_tlbid_data *data;
++	int ret;
++
++	if (!system_supports_tlbid())
++		return 0;
++
++	data = kzalloc(sizeof(*data), GFP_KERNEL);
++	if (!data)
++		return -ENOMEM;
++
++	/*
++	 * When the host has enabled TLBID but the guest has not,
++	 * KVM can map vDomain0 to pDomainN to optimize the TLBI
++	 * instructions for the guest. Therefore, the value is set
++	 * to 0x1, indicating that the vCPU is in vDomain0. If QEMU
++	 * calls KVM_ARM_VCPU_SET_VDOMAIN to configure vdomains, this
++	 * value will be overwritten to support the guest enabling
++	 * TLBID.
++	 */
++	data->vdomain_bitmap = 0x1;
++	data->last_pcpu = -1;
++	INIT_LIST_HEAD(&data->pcpu_node);
++
++	vdomain = &vcpu->kvm->arch.tlbidomain;
++	if (!vdomain->kvm_tlbid_enabled) {
++		kfree(data);
++		return 0;
++	}
++
++	ret = xa_insert(&vdomain->vcpu_data_array,
++			vcpu->vcpu_idx, data, GFP_KERNEL);
++	if (ret) {
++		kfree(data);
++		return ret == -EBUSY ? 0 : ret;
++	}
++
++	return 0;
++}
++#else
++static inline int kvm_arm_tlbidomain_vcpu_init(struct kvm_vcpu *vcpu) { return 0; }
++#endif
++
+ static int kvm_arch_vcpu_ioctl_vcpu_init(struct kvm_vcpu *vcpu,
+ 					 struct kvm_vcpu_init *init)
+ {
+@@ -1825,7 +2256,9 @@ static int kvm_arch_vcpu_ioctl_vcpu_init(struct kvm_vcpu *vcpu,
+ 	kvm_arm_pvtimer_status_set_active(vcpu, false);
+ #endif
+ 
+-	return 0;
++	ret = kvm_arm_tlbidomain_vcpu_init(vcpu);
++
++	return ret;
+ }
+ 
+ static int kvm_arm_vcpu_set_attr(struct kvm_vcpu *vcpu,
+@@ -1912,6 +2345,52 @@ static int kvm_arm_vcpu_rmm_psci_complete(struct kvm_vcpu *vcpu,
+ 	return realm_psci_complete(vcpu, target, arg->psci_status);
+ }
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static int kvm_arm_vcpu_set_vdomain(struct kvm_vcpu *vcpu,
++				     struct kvm_arm_set_vdomain *vdomain)
++{
++	struct tlbidomain *td = &vcpu->kvm->arch.tlbidomain;
++	u32 vdomain_bitmap = vdomain->vdomain_bitmap;
++	u8 num_vdomains = vdomain->num_vdomains;
++	u8 nvis, max_vdomains;
++	struct vcpu_tlbid_data *data;
++
++	if (!td->kvm_tlbid_enabled)
++		return -EINVAL;
++
++	nvis = td->nvis;
++	max_vdomains = 1 << nvis;
++
++	if (num_vdomains > max_vdomains)
++		return -EINVAL;
++
++	if (td->num_domains != -1 && td->num_domains != num_vdomains)
++		return -EINVAL;
++
++	data = xa_load(&td->vcpu_data_array, vcpu->vcpu_idx);
++	if (!data) {
++		kvm_err("vCPU%d: Failed to load vcpu_tlbid_data\n", vcpu->vcpu_idx);
++		return -EINVAL;
++	}
++
++	data->vdomain_bitmap = vdomain_bitmap;
++	td->num_domains = num_vdomains;
++	td->guest_tlbid_enabled = true;
++
++	kvm_info("vCPU%d: vDomain bitmap: 0x%x\n", vcpu->vcpu_idx, vdomain_bitmap);
++
++	kvm_update_aa64mmfr4_tlbid(vcpu->kvm);
++
++	return 0;
++}
++#else
++static inline int kvm_arm_vcpu_set_vdomain(struct kvm_vcpu *vcpu,
++					   struct kvm_arm_set_vdomain *vdomain)
++{
++	return -EINVAL;
++}
++#endif
++
+ long kvm_arch_vcpu_ioctl(struct file *filp,
+ 			 unsigned int ioctl, unsigned long arg)
+ {
+@@ -2045,6 +2524,17 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+ 			return -EFAULT;
+ 		return kvm_arm_vcpu_rmm_psci_complete(vcpu, &req);
+ 	}
++	case KVM_ARM_VCPU_SET_VDOMAIN: {
++		struct kvm_arm_set_vdomain vdomain;
++
++		if (!kvm_vcpu_initialized(vcpu))
++			return -ENOEXEC;
++
++		if (copy_from_user(&vdomain, argp, sizeof(vdomain)))
++			return -EFAULT;
++
++		return kvm_arm_vcpu_set_vdomain(vcpu, &vdomain);
++	}
+ 	default:
+ 		r = -EINVAL;
+ 	}
+@@ -2110,6 +2600,27 @@ static int kvm_vm_set_attr(struct kvm *kvm, struct kvm_device_attr *attr)
+ 	}
+ }
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static int kvm_arm_get_vdomain_num(struct kvm *kvm,
++				   struct kvm_arm_get_vdomain *vdomain)
++{
++	struct tlbidomain *td = &kvm->arch.tlbidomain;
++
++	if (!td->kvm_tlbid_enabled)
++		return -EINVAL;
++
++	vdomain->max_vdomains = 1 << td->nvis;
++
++	return 0;
++}
++#else
++static inline int kvm_arm_get_vdomain_num(struct kvm *kvm,
++					  struct kvm_arm_get_vdomain *vdomain)
++{
++	return -EINVAL;
++}
++#endif
++
+ int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
+ {
+ 	struct kvm *kvm = filp->private_data;
+@@ -2217,6 +2728,19 @@ int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
+ 			return -EFAULT;
+ 		return kvm_vm_ioctl_get_reg_writable_masks(kvm, &range);
+ 	}
++	case KVM_ARM_GET_VDOMAIN_NUM: {
++		struct kvm_arm_get_vdomain vdomain;
++		int ret;
++
++		ret = kvm_arm_get_vdomain_num(kvm, &vdomain);
++		if (ret)
++			return ret;
++
++		if (copy_to_user(argp, &vdomain, sizeof(vdomain)))
++			return -EFAULT;
++
++		return 0;
++	}
+ 	default:
+ 		return -EINVAL;
+ 	}
+diff --git a/arch/arm64/kvm/hisilicon/hisi_virt.c b/arch/arm64/kvm/hisilicon/hisi_virt.c
+index 9a04e4052abd..0be4ebbc540d 100644
+--- a/arch/arm64/kvm/hisilicon/hisi_virt.c
++++ b/arch/arm64/kvm/hisilicon/hisi_virt.c
+@@ -243,6 +243,15 @@ bool hisi_dvmbm_supported(void)
+ 		return false;
+ 	}
+ 
++	/*
++	 * When TLBID is enabled, DVMBM cannot be enabled.
++	 * After BIOS enables TLBID, the DVMBM field of AIDR
++	 * remains set, therefore interception needs to be
++	 * performed in the code.
++	 */
++	if (system_supports_tlbid())
++		return false;
++
+ 	/* Determine whether DVMBM is supported by the hardware */
+ 	if (!(read_sysreg(aidr_el1) & AIDR_EL1_DVMBM_MASK))
+ 		return false;
+diff --git a/arch/arm64/kvm/hyp/include/hyp/switch.h b/arch/arm64/kvm/hyp/include/hyp/switch.h
+index 6e3c26416658..a4e096463666 100644
+--- a/arch/arm64/kvm/hyp/include/hyp/switch.h
++++ b/arch/arm64/kvm/hyp/include/hyp/switch.h
+@@ -249,6 +249,10 @@ static inline void __activate_traps_common(struct kvm_vcpu *vcpu)
+ #ifdef CONFIG_ENABLE_KVM_FPMR
+ 		if (kvm_has_fpmr(kern_hyp_va(vcpu->kvm)))
+ 			hcrx |= HCRX_EL2_EnFPM;
++#endif
++#ifdef CONFIG_KVM_ARM_VTLBID
++		if (kern_hyp_va(vcpu->kvm)->arch.tlbidomain.kvm_tlbid_enabled)
++			hcrx |= HCRX_EL2_VTLBIDEn;
+ #endif
+ 		ctxt_sys_reg(hctxt, HCRX_EL2) = read_sysreg_s(SYS_HCRX_EL2);
+ 		write_sysreg_s(hcrx, SYS_HCRX_EL2);
+diff --git a/arch/arm64/kvm/sys_regs.c b/arch/arm64/kvm/sys_regs.c
+index fc2a1bc3c314..065bdc02ec81 100644
+--- a/arch/arm64/kvm/sys_regs.c
++++ b/arch/arm64/kvm/sys_regs.c
+@@ -276,6 +276,34 @@ static bool access_vm_reg(struct kvm_vcpu *vcpu,
+ 	return true;
+ }
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++static bool access_tlbididr(struct kvm_vcpu *vcpu,
++			 struct sys_reg_params *p,
++			 const struct sys_reg_desc *r)
++{
++	struct tlbidomain *vdomain = &vcpu->kvm->arch.tlbidomain;
++
++	if (p->is_write)
++		return ignore_write(vcpu, p);
++
++	if (!vdomain->kvm_tlbid_enabled) {
++		kvm_inject_undefined(vcpu);
++		return false;
++	}
++
++	p->regval = vdomain->tlbididr_val;
++	return true;
++}
++#else
++static bool access_tlbididr(struct kvm_vcpu *vcpu,
++			 struct sys_reg_params *p,
++			 const struct sys_reg_desc *r)
++{
++	kvm_inject_undefined(vcpu);
++	return false;
++}
++#endif
++
+ static bool access_actlr(struct kvm_vcpu *vcpu,
+ 			 struct sys_reg_params *p,
+ 			 const struct sys_reg_desc *r)
+@@ -1445,6 +1473,18 @@ static u64 __kvm_read_sanitised_id_reg(const struct kvm_vcpu *vcpu,
+ 		val &= ID_AA64MMFR3_EL1_TCRX | ID_AA64MMFR3_EL1_S1POE |
+ 			ID_AA64MMFR3_EL1_S1PIE;
+ 		break;
++	case SYS_ID_AA64MMFR4_EL1:
++	{
++#ifdef CONFIG_KVM_ARM_VTLBID
++		struct tlbidomain *vdomain = &vcpu->kvm->arch.tlbidomain;
++
++		if (!vdomain->guest_tlbid_enabled)
++			val &= ~ID_AA64MMFR4_EL1_TLBID;
++#else
++		val &= ~ID_AA64MMFR4_EL1_TLBID;
++#endif
++		break;
++	}
+ 	case SYS_ID_MMFR4_EL1:
+ 		val &= ~ARM64_FEATURE_MASK(ID_MMFR4_EL1_CCIDX);
+ 		break;
+@@ -2552,7 +2592,7 @@ static const struct sys_reg_desc sys_reg_descs[] = {
+ 	ID_WRITABLE(ID_AA64MMFR3_EL1, (ID_AA64MMFR3_EL1_TCRX	|
+ 				       ID_AA64MMFR3_EL1_S1PIE   |
+ 				       ID_AA64MMFR3_EL1_S1POE)),
+-	ID_UNALLOCATED(7,4),
++	ID_WRITABLE(ID_AA64MMFR4_EL1, ID_AA64MMFR4_EL1_TLBID_MASK),
+ 	ID_UNALLOCATED(7,5),
+ 	ID_UNALLOCATED(7,6),
+ 	ID_UNALLOCATED(7,7),
+@@ -2633,6 +2673,7 @@ static const struct sys_reg_desc sys_reg_descs[] = {
+ 	{ SYS_DESC(SYS_LORN_EL1), trap_loregion },
+ 	{ SYS_DESC(SYS_LORC_EL1), trap_loregion },
+ 	{ SYS_DESC(SYS_MPAMIDR_EL1), workaround_bad_mpam_abi },
++	{ SYS_DESC(SYS_TLBIDIDR_EL1), access_tlbididr },
+ 	{ SYS_DESC(SYS_LORID_EL1), trap_loregion },
+ 
+ 	{ SYS_DESC(SYS_MPAM1_EL1), workaround_bad_mpam_abi },
+@@ -3771,6 +3812,42 @@ const struct sys_reg_desc *get_reg_by_id(u64 id,
+ 	return find_reg(&params, table, num);
+ }
+ 
++/*
++ * Update the VM's stored value for an ID register.
++ */
++#ifdef CONFIG_KVM_ARM_VTLBID
++void kvm_update_aa64mmfr4_tlbid(struct kvm *kvm)
++{
++	struct tlbidomain *vdomain = &kvm->arch.tlbidomain;
++	u64 val, tlbid_val;
++
++	mutex_lock(&kvm->arch.config_lock);
++
++	if (kvm_vm_has_ran_once(kvm)) {
++		/*
++		 * ID_AA64MMFR4 is a VM-level register already set during
++		 * the first vCPU init. Skip the write to avoid triggering
++		 * KVM_BUG_ON in kvm_set_vm_id_reg(). The per-vCPU
++		 * vdomain_bitmap is still updated by the caller.
++		 */
++		mutex_unlock(&kvm->arch.config_lock);
++		return;
++	}
++
++	val = kvm_read_vm_id_reg(kvm, SYS_ID_AA64MMFR4_EL1);
++	tlbid_val = read_sanitised_ftr_reg(SYS_ID_AA64MMFR4_EL1);
++	tlbid_val &= ID_AA64MMFR4_EL1_TLBID_MASK;
++
++	val &= ~ID_AA64MMFR4_EL1_TLBID_MASK;
++	if (vdomain->guest_tlbid_enabled)
++		val |= tlbid_val;
++
++	kvm_set_vm_id_reg(kvm, SYS_ID_AA64MMFR4_EL1, val);
++
++	mutex_unlock(&kvm->arch.config_lock);
++}
++#endif
++
+ /* Decode an index value, and find the sys_reg_desc entry. */
+ static const struct sys_reg_desc *
+ id_to_sys_reg_desc(struct kvm_vcpu *vcpu, u64 id,
+diff --git a/arch/arm64/kvm/sys_regs.h b/arch/arm64/kvm/sys_regs.h
+index 3080693719d2..8a2415921ba0 100644
+--- a/arch/arm64/kvm/sys_regs.h
++++ b/arch/arm64/kvm/sys_regs.h
+@@ -238,6 +238,12 @@ int kvm_sys_reg_get_user(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg,
+ int kvm_sys_reg_set_user(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg,
+ 			 const struct sys_reg_desc table[], unsigned int num);
+ 
++#ifdef CONFIG_KVM_ARM_VTLBID
++void kvm_update_aa64mmfr4_tlbid(struct kvm *kvm);
++#else
++static inline void kvm_update_aa64mmfr4_tlbid(struct kvm *kvm) { }
++#endif
++
+ #define AA32(_x)	.aarch32_map = AA32_##_x
+ #define Op0(_x) 	.Op0 = _x
+ #define Op1(_x) 	.Op1 = _x
+diff --git a/arch/arm64/kvm/trace_arm.h b/arch/arm64/kvm/trace_arm.h
+index 5b91456560b5..9e739cbac942 100644
+--- a/arch/arm64/kvm/trace_arm.h
++++ b/arch/arm64/kvm/trace_arm.h
+@@ -408,6 +408,53 @@ TRACE_EVENT(kvm_pvspin_kick_vcpu,
+ 		  __entry->vcpu_id, __entry->target_vcpu_id)
+ );
+ 
++TRACE_EVENT(kvm_tlbid_vcpu_info,
++	TP_PROTO(int vcpu_idx, int current_pcpu, int last_pcpu,
++		 u32 vdomain_bitmap),
++	TP_ARGS(vcpu_idx, current_pcpu, last_pcpu, vdomain_bitmap),
++
++	TP_STRUCT__entry(
++		__field(int,	vcpu_idx)
++		__field(int,	current_pcpu)
++		__field(int,	last_pcpu)
++		__field(u32,	vdomain_bitmap)
++	),
++
++	TP_fast_assign(
++		__entry->vcpu_idx	= vcpu_idx;
++		__entry->current_pcpu	= current_pcpu;
++		__entry->last_pcpu	= last_pcpu;
++		__entry->vdomain_bitmap	= vdomain_bitmap;
++	),
++
++	TP_printk("vcpu=%d current_pcpu=%d last_pcpu=%d vdomain_bitmap=0x%x",
++		  __entry->vcpu_idx, __entry->current_pcpu,
++		  __entry->last_pcpu, __entry->vdomain_bitmap)
++);
++
++TRACE_EVENT(kvm_tlbid_domain_mapping,
++	TP_PROTO(int vdomain_id, const struct cpumask *cpumask,
++		 int pdomain_id),
++	TP_ARGS(vdomain_id, cpumask, pdomain_id),
++
++	TP_STRUCT__entry(
++		__field(int,	vdomain_id)
++		__cpumask(cpumask)
++		__field(int,	pdomain_id)
++	),
++
++	TP_fast_assign(
++		__entry->vdomain_id	= vdomain_id;
++		__assign_cpumask(cpumask, cpumask_bits(cpumask));
++		__entry->pdomain_id	= pdomain_id;
++	),
++
++	TP_printk("Domain mapping: vDomain=%d, cpumask=%s, pDomain=%d",
++		  __entry->vdomain_id,
++		  __get_cpumask(cpumask),
++		  __entry->pdomain_id)
++);
++
+ #endif /* _TRACE_ARM_ARM64_KVM_H */
+ 
+ #undef TRACE_INCLUDE_PATH
+diff --git a/arch/arm64/tools/sysreg b/arch/arm64/tools/sysreg
+index 2155315581b2..8896f2310d23 100644
+--- a/arch/arm64/tools/sysreg
++++ b/arch/arm64/tools/sysreg
+@@ -3001,7 +3001,9 @@ Field	0	nPMECR_EL1
+ EndSysreg
+ 
+ Sysreg	HFGRTR2_EL2	3	4	3	1	2
+-Res0	63:15
++Res0	63:31
++Field	30	nTLBIDIDR_EL1
++Res0	29:15
+ Field	14	nACTLRALIAS_EL1
+ Field	13	nACTLRMASK_EL1
+ Field	12	nTCR2ALIAS_EL1
+@@ -3178,7 +3180,8 @@ Fields	ZCR_ELx
+ EndSysreg
+ 
+ Sysreg	HCRX_EL2	3	4	1	2	2
+-Res0	63:25
++Res0	63:26
++Field	25	VTLBIDEn
+ Field	24	PACMEn
+ Field	23	EnFPM
+ Field	22	GCSEn
+@@ -3586,3 +3589,19 @@ Field	12:8	NVIS
+ Res0	7:5
+ Field	4:0	NIS
+ EndSysreg
++
++Sysreg	VTLBID0_EL2	3	4	2	8	0
++Field	63:0	TD
++EndSysreg
++
++Sysreg	VTLBID1_EL2	3	4	2	8	1
++Field	63:0	TD
++EndSysreg
++
++Sysreg	VTLBID2_EL2	3	4	2	8	2
++Field	63:0	TD
++EndSysreg
++
++Sysreg	VTLBID3_EL2	3	4	2	8	3
++Field	63:0	TD
++EndSysreg
+diff --git a/include/uapi/linux/kvm.h b/include/uapi/linux/kvm.h
+index 18ed07a68b2d..7d1a03393523 100644
+--- a/include/uapi/linux/kvm.h
++++ b/include/uapi/linux/kvm.h
+@@ -1315,6 +1315,7 @@ struct kvm_ppc_resize_hpt {
+ #define KVM_CAP_HYGON_COCO_EXT_CSV3_SP_MGR        (1 << 4)
+ 
+ #define KVM_CAP_ARM_HW_DIRTY_STATE_TRACK 502
++#define KVM_CAP_ARM_TLBIDOMAIN 503
+ 
+ #define KVM_CAP_ARM_HISI_IPIV 798
+ #define KVM_CAP_ARM_VIRT_MSI_BYPASS 799
+@@ -2358,4 +2359,17 @@ struct kvm_pre_fault_memory {
+ 	__u64 padding[5];
+ };
+ 
++struct kvm_arm_get_vdomain {
++	__u8 max_vdomains;
++};
++
++#define KVM_ARM_GET_VDOMAIN_NUM	_IOR(KVMIO, 0xd7, struct kvm_arm_get_vdomain)
++
++struct kvm_arm_set_vdomain {
++	__u32 vdomain_bitmap;
++	__u8 num_vdomains;
++};
++
++#define KVM_ARM_VCPU_SET_VDOMAIN	_IOW(KVMIO, 0xd8, struct kvm_arm_set_vdomain)
++
+ #endif /* __LINUX_KVM_H */

@@ -1,0 +1,4 @@
+dae917e25852b7eb168dbf9c3b3ddf838e057be1 arm64: idle: make arch_cpu_idle_{enter,exit} more refactorable
+598068dd2e4be39707904ce9960f8be2543a1eaa arm64: smt: Introduce VIP-SMT a QoS Mode for SMT
+f69e962c24efe044d5edb5212a568d57b576f4f1 arm64: smt: Add novipsmt kernel command line parameter
+3d62606ad0a51b977550096e4124cfa7ec49d42f arm64: configs: Enable ARM64_VIP_SMT in openeuler_defconfig

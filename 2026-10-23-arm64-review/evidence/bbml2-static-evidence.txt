@@ -1,0 +1,821 @@
+Fixed HEAD: 00ba9aa3d7f58091cb87f8da96599d6d72023ea0
+Static source extracts only; no tests executed.
+
+--- arch/arm64/include/asm/pgtable.h:90-100 ---
+90: #define __pte_clear(mm, addr, ptep) \
+91: 				__set_pte(ptep, __pte(0))
+92: #define pte_page(pte)		(pfn_to_page(pte_pfn(pte)))
+93: 
+94: /*
+95:  * The following only work if pte_present(). Undefined behaviour otherwise.
+96:  */
+97: #define pte_present(pte)	(!!(pte_val(pte) & (PTE_VALID | PTE_PROT_NONE)))
+98: #define pte_young(pte)		(!!(pte_val(pte) & PTE_AF))
+99: #define pte_special(pte)	(!!(pte_val(pte) & PTE_SPECIAL))
+100: #define pte_write(pte)		(!!(pte_val(pte) & PTE_WRITE))
+
+--- arch/arm64/include/asm/pgtable.h:488-500 ---
+488: }
+489: #endif
+490: 
+491: #define pmd_present_invalid(pmd)	pte_present_invalid(pmd_pte(pmd))
+492: 
+493: static inline int pmd_present(pmd_t pmd)
+494: {
+495: 	return pte_present(pmd_pte(pmd)) || pmd_present_invalid(pmd);
+496: }
+497: 
+498: /*
+499:  * THP definitions.
+500:  */
+
+--- arch/arm64/include/asm/pgtable.h:745-756 ---
+745: 
+746: #define pmd_ERROR(e)	\
+747: 	pr_err("%s:%d: bad pmd %016llx.\n", __FILE__, __LINE__, pmd_val(e))
+748: 
+749: #define pud_none(pud)		(!pud_val(pud))
+750: #define pud_bad(pud)		((pud_val(pud) & PUD_TYPE_MASK) != \
+751: 				 PUD_TYPE_TABLE)
+752: #define pud_present(pud)	pte_present(pud_pte(pud))
+753: #define pud_leaf(pud)		(pud_present(pud) && !pud_table(pud))
+754: #define pud_valid(pud)		pte_valid(pud_pte(pud))
+755: #define pud_user(pud)		pte_user(pud_pte(pud))
+756: #define pud_user_exec(pud)	pte_user_exec(pud_pte(pud))
+
+--- arch/arm64/mm/mmu.c:350-365 ---
+350: 	do {
+351: 		pud_t old_pud = READ_ONCE(*pudp);
+352: 
+353: 		next = pud_addr_end(addr, end);
+354: 
+355: 		/*
+356: 		 * For 4K granule only, attempt to put down a 1GB block
+357: 		 */
+358: 		if (pud_sect_supported() &&
+359: 		   ((addr | next | phys) & ~PUD_MASK) == 0 &&
+360: 		    (flags & (NO_BLOCK_MAPPINGS | NO_PUD_BLOCK_MAPPINGS)) == 0) {
+361: 			pud_set_huge(pudp, phys, prot);
+362: 
+363: 			/*
+364: 			 * After the PUD entry has been populated once, we
+365: 			 * only allow updates to the permission attributes.
+
+--- arch/arm64/mm/mmu.c:567-655 ---
+567: static int split_kernel_leaf_mapping_locked(unsigned long addr)
+568: {
+569: 	pgd_t *pgdp, pgd;
+570: 	p4d_t *p4dp, p4d;
+571: 	pud_t *pudp, pud;
+572: 	pmd_t *pmdp, pmd;
+573: 	pte_t *ptep, pte;
+574: 	int ret = 0;
+575: 
+576: 	/*
+577: 	 * PGD: If addr is PGD aligned then addr already describes a leaf
+578: 	 * boundary. If not present then there is nothing to split.
+579: 	 */
+580: 	if (ALIGN_DOWN(addr, PGDIR_SIZE) == addr)
+581: 		goto out;
+582: 	pgdp = pgd_offset_k(addr);
+583: 	pgd = pgdp_get(pgdp);
+584: 	if (!pgd_present(pgd))
+585: 		goto out;
+586: 
+587: 	/*
+588: 	 * P4D: If addr is P4D aligned then addr already describes a leaf
+589: 	 * boundary. If not present then there is nothing to split.
+590: 	 */
+591: 	if (ALIGN_DOWN(addr, P4D_SIZE) == addr)
+592: 		goto out;
+593: 	p4dp = p4d_offset(pgdp, addr);
+594: 	p4d = p4dp_get(p4dp);
+595: 	if (!p4d_present(p4d))
+596: 		goto out;
+597: 
+598: 	/*
+599: 	 * PUD: If addr is PUD aligned then addr already describes a leaf
+600: 	 * boundary. If not present then there is nothing to split. Otherwise,
+601: 	 * if we have a pud leaf, split to contpmd.
+602: 	 */
+603: 	if (ALIGN_DOWN(addr, PUD_SIZE) == addr)
+604: 		goto out;
+605: 	pudp = pud_offset(p4dp, addr);
+606: 	pud = pudp_get(pudp);
+607: 	if (!pud_present(pud))
+608: 		goto out;
+609: 	if (pud_leaf(pud)) {
+610: 		ret = split_pud(pudp, pud, GFP_PGTABLE_KERNEL, true);
+611: 		if (ret)
+612: 			goto out;
+613: 	}
+614: 
+615: 	/*
+616: 	 * CONTPMD: If addr is CONTPMD aligned then addr already describes a
+617: 	 * leaf boundary. If not present then there is nothing to split.
+618: 	 * Otherwise, if we have a contpmd leaf, split to pmd.
+619: 	 */
+620: 	if (ALIGN_DOWN(addr, CONT_PMD_SIZE) == addr)
+621: 		goto out;
+622: 	pmdp = pmd_offset(pudp, addr);
+623: 	pmd = pmdp_get(pmdp);
+624: 	if (!pmd_present(pmd))
+625: 		goto out;
+626: 	if (pmd_leaf(pmd)) {
+627: 		if (pmd_cont(pmd))
+628: 			split_contpmd(pmdp);
+629: 		/*
+630: 		 * PMD: If addr is PMD aligned then addr already describes a
+631: 		 * leaf boundary. Otherwise, split to contpte.
+632: 		 */
+633: 		if (ALIGN_DOWN(addr, PMD_SIZE) == addr)
+634: 			goto out;
+635: 		ret = split_pmd(pmdp, pmd, GFP_PGTABLE_KERNEL, true);
+636: 		if (ret)
+637: 			goto out;
+638: 	}
+639: 
+640: 	/*
+641: 	 * CONTPTE: If addr is CONTPTE aligned then addr already describes a
+642: 	 * leaf boundary. If not present then there is nothing to split.
+643: 	 * Otherwise, if we have a contpte leaf, split to pte.
+644: 	 */
+645: 	if (ALIGN_DOWN(addr, CONT_PTE_SIZE) == addr)
+646: 		goto out;
+647: 	ptep = pte_offset_kernel(pmdp, addr);
+648: 	pte = __ptep_get(ptep);
+649: 	if (!pte_present(pte))
+650: 		goto out;
+651: 	if (pte_cont(pte))
+652: 		split_contpte(ptep);
+653: 
+654: out:
+655: 	return ret;
+
+--- arch/arm64/mm/mmu.c:658-750 ---
+658: static inline bool force_pte_mapping(void)
+659: {
+660: 	const bool bbml3 = system_capabilities_finalized() ?
+661: 		system_supports_bbml3() : cpu_supports_bbml3();
+662: 
+663: 	if (debug_pagealloc_enabled())
+664: 		return true;
+665: 	if (bbml3)
+666: 		return false;
+667: 	return rodata_full || arm64_kfence_can_set_direct_map() || is_realm_world();
+668: }
+669: 
+670: static DEFINE_MUTEX(pgtable_split_lock);
+671: static bool linear_map_requires_bbml3;
+672: 
+673: int split_kernel_leaf_mapping(unsigned long start, unsigned long end)
+674: {
+675: 	int ret;
+676: 
+677: 	/*
+678: 	 * If the region is within a pte-mapped area, there is no need to try to
+679: 	 * split. Additionally, CONFIG_DEBUG_PAGEALLOC and CONFIG_KFENCE may
+680: 	 * change permissions from atomic context so for those cases (which are
+681: 	 * always pte-mapped), we must not go any further because taking the
+682: 	 * mutex below may sleep. Do not call force_pte_mapping() here because
+683: 	 * it could return a confusing result if called from a secondary cpu
+684: 	 * prior to finalizing caps. Instead, linear_map_requires_bbml3 gives us
+685: 	 * what we need.
+686: 	 */
+687: 	if (!linear_map_requires_bbml3 || is_kfence_address((void *)start))
+688: 		return 0;
+689: 
+690: 	if (!system_supports_bbml3()) {
+691: 		/*
+692: 		 * BBML3 systems should not be trying to change
+693: 		 * permissions on anything that is not pte-mapped in the first
+694: 		 * place. Just return early and let the permission change code
+695: 		 * raise a warning if not already pte-mapped.
+696: 		 */
+697: 		if (system_capabilities_finalized())
+698: 			return 0;
+699: 
+700: 		/*
+701: 		 * Boot-time: split_kernel_leaf_mapping_locked() allocates from
+702: 		 * page allocator. Can't split until it's available.
+703: 		 */
+704: 		if (WARN_ON(!page_alloc_available))
+705: 			return -EBUSY;
+706: 
+707: 		/*
+708: 		 * Boot-time: Started secondary cpus but don't know if they
+709: 		 * support BBML3 yet. Can't allow splitting in this window
+710: 		 * in case they don't.
+711: 		 */
+712: 		if (WARN_ON(num_online_cpus() > 1))
+713: 			return -EBUSY;
+714: 	}
+715: 
+716: 	/*
+717: 	 * Ensure start and end are at least page-aligned since this is the
+718: 	 * finest granularity we can split to.
+719: 	 */
+720: 	if (start != PAGE_ALIGN(start) || end != PAGE_ALIGN(end))
+721: 		return -EINVAL;
+722: 
+723: 	mutex_lock(&pgtable_split_lock);
+724: 	arch_enter_lazy_mmu_mode();
+725: 
+726: 	/*
+727: 	 * The split_kernel_leaf_mapping_locked() may sleep, it is not a
+728: 	 * problem for ARM64 since ARM64's lazy MMU implementation allows
+729: 	 * sleeping.
+730: 	 *
+731: 	 * Optimize for the common case of splitting out a single page from a
+732: 	 * larger mapping. Here we can just split on the "least aligned" of
+733: 	 * start and end and this will guarantee that there must also be a split
+734: 	 * on the more aligned address since the both addresses must be in the
+735: 	 * same contpte block and it must have been split to ptes.
+736: 	 */
+737: 	if (end - start == PAGE_SIZE) {
+738: 		start = __ffs(start) < __ffs(end) ? start : end;
+739: 		ret = split_kernel_leaf_mapping_locked(start);
+740: 	} else {
+741: 		ret = split_kernel_leaf_mapping_locked(start);
+742: 		if (!ret)
+743: 			ret = split_kernel_leaf_mapping_locked(end);
+744: 	}
+745: 
+746: 	arch_leave_lazy_mmu_mode();
+747: 	mutex_unlock(&pgtable_split_lock);
+748: 	return ret;
+749: }
+750: 
+
+--- arch/arm64/mm/mmu.c:824-889 ---
+824: static int __init linear_map_split_to_ptes(void *__unused)
+825: {
+826: 	/*
+827: 	 * Repainting the linear map must be done by CPU0 (the boot CPU) because
+828: 	 * that's the only CPU that we know supports BBML3. The other CPUs will
+829: 	 * be held in a waiting area with the idmap active.
+830: 	 */
+831: 	if (!smp_processor_id()) {
+832: 		unsigned long lstart = _PAGE_OFFSET(vabits_actual);
+833: 		unsigned long lend = PAGE_END;
+834: 		unsigned long kstart = (unsigned long)lm_alias(_stext);
+835: 		unsigned long kend = (unsigned long)lm_alias(__init_begin);
+836: 		int ret;
+837: 
+838: 		/*
+839: 		 * Wait for all secondary CPUs to be put into the waiting area.
+840: 		 */
+841: 		smp_cond_load_acquire(&idmap_kpti_bbml3_flag, VAL == num_online_cpus());
+842: 
+843: 		/*
+844: 		 * Walk all of the linear map [lstart, lend), except the kernel
+845: 		 * linear map alias [kstart, kend), and split all mappings to
+846: 		 * PTE. The kernel alias remains static throughout runtime so
+847: 		 * can continue to be safely mapped with large mappings.
+848: 		 */
+849: 		ret = range_split_to_ptes(lstart, kstart, GFP_ATOMIC);
+850: 		if (!ret)
+851: 			ret = range_split_to_ptes(kend, lend, GFP_ATOMIC);
+852: 		if (ret)
+853: 			panic("Failed to split linear map\n");
+854: 		flush_tlb_kernel_range(lstart, lend);
+855: 
+856: 		/*
+857: 		 * Relies on dsb in flush_tlb_kernel_range() to avoid reordering
+858: 		 * before any page table split operations.
+859: 		 */
+860: 		WRITE_ONCE(idmap_kpti_bbml3_flag, 0);
+861: 	} else {
+862: 		typedef void (wait_split_fn)(void);
+863: 		extern wait_split_fn wait_linear_map_split_to_ptes;
+864: 		wait_split_fn *wait_fn;
+865: 
+866: 		wait_fn = (void *)__pa_symbol(wait_linear_map_split_to_ptes);
+867: 
+868: 		/*
+869: 		 * At least one secondary CPU doesn't support BBML3 so cannot
+870: 		 * tolerate the size of the live mappings changing. So have the
+871: 		 * secondary CPUs wait for the boot CPU to make the changes
+872: 		 * with the idmap active and init_mm inactive.
+873: 		 */
+874: 		cpu_install_idmap();
+875: 		wait_fn();
+876: 		cpu_uninstall_idmap();
+877: 	}
+878: 
+879: 	return 0;
+880: }
+881: 
+882: void __init linear_map_maybe_split_to_ptes(void)
+883: {
+884: 	if (linear_map_requires_bbml3 && !cpus_have_cap(ARM64_HAS_BBML3)) {
+885: 		init_idmap_kpti_bbml3_flag();
+886: 		stop_machine(linear_map_split_to_ptes, NULL, cpu_online_mask);
+887: 	}
+888: }
+889: 
+
+--- arch/arm64/mm/mmu.c:1058-1070 ---
+1058: 	BUILD_BUG_ON(pgd_index(direct_map_end - 1) == pgd_index(direct_map_end));
+1059: 
+1060: 	early_kfence_pool = arm64_kfence_alloc_pool();
+1061: 
+1062: 	linear_map_requires_bbml3 = !force_pte_mapping() && can_set_direct_map();
+1063: 
+1064: 	if (force_pte_mapping() || is_virtcca_cvm_world())
+1065: 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+1066: 	else if (should_pmd_linear_mapping())
+1067: 		flags |= NO_PUD_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+1068: 
+1069: 	/*
+1070: 	 * Take care not to create a writable alias for the
+
+--- arch/arm64/mm/mmu.c:1864-1880 ---
+1864: 
+1865: int arch_add_memory(int nid, u64 start, u64 size,
+1866: 		    struct mhp_params *params)
+1867: {
+1868: 	int ret, flags = NO_EXEC_MAPPINGS;
+1869: 
+1870: 	VM_BUG_ON(!mhp_range_allowed(start, size, true));
+1871: 
+1872: 	if (force_pte_mapping() || is_virtcca_cvm_world())
+1873: 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+1874: 	else if (should_pmd_linear_mapping() || numa_is_remote_node(nid))
+1875: 		flags |= NO_PUD_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+1876: 
+1877: 	__create_pgd_mapping(swapper_pg_dir, start, __phys_to_virt(start),
+1878: 			     size, params->pgprot, __pgd_pgtable_alloc,
+1879: 			     flags);
+1880: 
+
+--- arch/arm64/mm/pageattr.c:38-69 ---
+38: 
+39: static int pageattr_pud_entry(pud_t *pud, unsigned long addr,
+40: 			      unsigned long next, struct mm_walk *walk)
+41: {
+42: 	pud_t val = pudp_get(pud);
+43: 
+44: 	if (pud_leaf(val)) {
+45: 		if (WARN_ON_ONCE((next - addr) != PUD_SIZE))
+46: 			return -EINVAL;
+47: 		val = __pud(set_pageattr_masks(pud_val(val), walk));
+48: 		set_pud(pud, val);
+49: 		walk->action = ACTION_CONTINUE;
+50: 	}
+51: 
+52: 	return 0;
+53: }
+54: 
+55: static int pageattr_pmd_entry(pmd_t *pmd, unsigned long addr,
+56: 			      unsigned long next, struct mm_walk *walk)
+57: {
+58: 	pmd_t val = pmdp_get(pmd);
+59: 
+60: 	if (pmd_leaf(val)) {
+61: 		if (WARN_ON_ONCE((next - addr) != PMD_SIZE))
+62: 			return -EINVAL;
+63: 		val = __pmd(set_pageattr_masks(pmd_val(val), walk));
+64: 		set_pmd(pmd, val);
+65: 		walk->action = ACTION_CONTINUE;
+66: 	}
+67: 
+68: 	return 0;
+69: }
+
+--- arch/arm64/mm/pageattr.c:106-151 ---
+106: 			     pgprot_t set_mask, pgprot_t clear_mask)
+107: {
+108: 	struct page_change_data data;
+109: 	int ret;
+110: 
+111: 	data.set_mask = set_mask;
+112: 	data.clear_mask = clear_mask;
+113: 
+114: 	ret = split_kernel_leaf_mapping(start, start + size);
+115: 	if (WARN_ON_ONCE(ret))
+116: 		return ret;
+117: 
+118: 	arch_enter_lazy_mmu_mode();
+119: 
+120: 	/*
+121: 	 * The caller must ensure that the range we are operating on does not
+122: 	 * partially overlap a block mapping, or a cont mapping. Any such case
+123: 	 * must be eliminated by splitting the mapping.
+124: 	 */
+125: 	ret = walk_kernel_page_table_range_lockless(start, start + size,
+126: 						    &pageattr_ops, NULL, &data);
+127: 	arch_leave_lazy_mmu_mode();
+128: 
+129: 	return ret;
+130: }
+131: 
+132: static int __change_memory_common(unsigned long start, unsigned long size,
+133: 				  pgprot_t set_mask, pgprot_t clear_mask)
+134: {
+135: 	int ret;
+136: 
+137: 	ret = update_range_prot(start, size, set_mask, clear_mask);
+138: 
+139: 	/*
+140: 	 * If the memory is being switched from present-invalid to valid without
+141: 	 * changing any other bits then a TLBI isn't required as a non-valid
+142: 	 * entry cannot be cached in the TLB.
+143: 	 */
+144: 	if (pgprot_val(set_mask) != PTE_PRESENT_VALID_KERNEL ||
+145: 	    pgprot_val(clear_mask) != PTE_PRESENT_INVALID)
+146: 		flush_tlb_kernel_range(start, start + size);
+147: 	return ret;
+148: }
+149: 
+150: static int change_memory_common(unsigned long addr, int numpages,
+151: 				pgprot_t set_mask, pgprot_t clear_mask)
+
+--- arch/arm64/mm/pageattr.c:279-319 ---
+279: 	unsigned long set_prot = 0, clear_prot = 0;
+280: 	phys_addr_t start, end;
+281: 	int ret;
+282: 
+283: 	if (!is_realm_world())
+284: 		return 0;
+285: 
+286: 	if (!__is_lm_address(addr))
+287: 		return -EINVAL;
+288: 
+289: 	start = __virt_to_phys(addr);
+290: 	end = start + numpages * PAGE_SIZE;
+291: 
+292: 	if (encrypt)
+293: 		clear_prot = PROT_NS_SHARED;
+294: 	else
+295: 		set_prot = PROT_NS_SHARED;
+296: 
+297: 	/*
+298: 	 * Break the mapping before we make any changes to avoid stale TLB
+299: 	 * entries or Synchronous External Aborts caused by RIPAS_EMPTY
+300: 	 */
+301: 	ret = __change_memory_common(addr, PAGE_SIZE * numpages,
+302: 				     __pgprot(set_prot | PTE_PRESENT_INVALID),
+303: 				     __pgprot(clear_prot | PTE_PRESENT_VALID_KERNEL));
+304: 
+305: 	if (ret)
+306: 		return ret;
+307: 
+308: 	if (encrypt)
+309: 		ret = rsi_set_memory_range_protected(start, end);
+310: 	else
+311: 		ret = rsi_set_memory_range_shared(start, end);
+312: 
+313: 	if (ret)
+314: 		return ret;
+315: 
+316: 	return __change_memory_common(addr, PAGE_SIZE * numpages,
+317: 				      __pgprot(PTE_PRESENT_VALID_KERNEL),
+318: 				      __pgprot(PTE_PRESENT_INVALID));
+319: }
+
+--- arch/arm64/mm/pfn_range_alloc.c:240-282 ---
+240: struct folio *pfn_range_alloc(unsigned int nr_pages, int nid)
+241: {
+242: 	unsigned long min_align = PFN_RANGE_ALLOC_NR_PAGES;
+243: 	gfp_t gfp_mask = (GFP_KERNEL | __GFP_COMP) & ~__GFP_RECLAIM;
+244: 	unsigned long start, bitmap_no, bitmap_count, mask, offset;
+245: 	struct pmd_lm_range *mem_range;
+246: 	struct folio *folio = ERR_PTR(-EINVAL);
+247: 	unsigned long pfn;
+248: 	int ret;
+249: 
+250: 	if (in_interrupt())
+251: 		goto out;
+252: 
+253: 	if (nid < 0 || nid >= MAX_NUMNODES)
+254: 		goto out;
+255: 
+256: #ifdef CONFIG_ARM64_4K_PAGES
+257: 	if (!IS_ALIGNED(nr_pages, min_align))
+258: 		goto out;
+259: #endif
+260: 
+261: #ifdef CONFIG_ARM64_64K_PAGES
+262: 	if (!can_set_direct_map())
+263: 		goto out;
+264: 	if (!is_power_of_2(nr_pages))
+265: 		goto out;
+266: #endif
+267: 
+268: 	if (can_set_direct_map() || should_pmd_linear_mapping()) {
+269: 		int order = ilog2(nr_pages);
+270: 
+271: 		gfp_mask |= __GFP_THISNODE;
+272: 		if (nr_pages <= MAX_ORDER_NR_PAGES) {
+273: 			gfp_mask |= __GFP_RECLAIM | __GFP_NOWARN | __GFP_NORETRY;
+274: 			folio = __folio_alloc_node(gfp_mask, order, nid);
+275: 		} else {
+276: 			folio = folio_alloc_gigantic(order, gfp_mask, nid, NULL);
+277: 		}
+278: 
+279: 		if (!folio)
+280: 			folio = ERR_PTR(-ENOMEM);
+281: 		goto out;
+282: 	}
+
+--- arch/arm64/mm/pfn_range_alloc.c:412-521 ---
+412: static inline int check_update_lm_arg(unsigned long start_pfn, unsigned long end_pfn)
+413: {
+414: 	unsigned long start, end;
+415: 	struct page *start_page;
+416: 	int nid;
+417: 
+418: 	if (can_set_direct_map())
+419: 		return 0;
+420: 
+421: 	start_page = pfn_to_page(start_pfn);
+422: 	nid = page_to_nid(start_page);
+423: 	start = (unsigned long)page_to_virt(start_page);
+424: 	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+425: 	if ((start_pfn >= reserved_range[nid].start_pfn &&
+426: 	    end_pfn <= reserved_range[nid].end_pfn)
+427: 	    || should_pmd_linear_mapping()) {
+428: 		if (!IS_ALIGNED(start, PFN_RANGE_ALLOC_SIZE) ||
+429: 			!IS_ALIGNED(end, PFN_RANGE_ALLOC_SIZE)) {
+430: 			return -EINVAL;
+431: 		}
+432: 	} else if (!IS_ALIGNED(start, PUD_SIZE) || !IS_ALIGNED(end, PUD_SIZE)) {
+433: 		return -EINVAL;
+434: 	}
+435: 
+436: 	return 0;
+437: }
+438: 
+439: static int invalid_pud_entry(pud_t *pudp, unsigned long addr,
+440: 				unsigned long next, struct mm_walk *walk)
+441: {
+442: 	bool set_invalid = (bool)walk->private;
+443: 	pud_t pud;
+444: 
+445: 	pud = pudp_get(pudp);
+446: 	if (pud_table(pud))
+447: 		return 0;
+448: 
+449: 	if (set_invalid)
+450: 		pud_val(pud) &= ~PTE_VALID;
+451: 	else
+452: 		pud_val(pud) |= PTE_VALID;
+453: 	set_pud(pudp, pud);
+454: 
+455: 	return 0;
+456: }
+457: 
+458: static int invalid_pmd_entry(pmd_t *pmdp, unsigned long addr,
+459: 				unsigned long next, struct mm_walk *walk)
+460: {
+461: 	bool set_invalid = (bool)walk->private;
+462: 	pmd_t pmd;
+463: 
+464: 	pmd = pmdp_get(pmdp);
+465: 	if (pmd_table(pmd))
+466: 		return 0;
+467: 
+468: 	if (set_invalid)
+469: 		pmd_val(pmd) &= ~PTE_VALID;
+470: 	else
+471: 		pmd_val(pmd) |= PTE_VALID;
+472: 	set_pmd(pmdp, pmd);
+473: 
+474: 	return 0;
+475: }
+476: 
+477: static int invalid_pte_entry(pte_t *ptep, unsigned long addr,
+478: 				unsigned long next, struct mm_walk *walk)
+479: {
+480: 	bool set_invalid = (bool)walk->private;
+481: 	pte_t pte;
+482: 
+483: 	pte = ptep_get(ptep);
+484: 
+485: 	if (set_invalid)
+486: 		pte_val(pte) &= ~PTE_VALID;
+487: 	else
+488: 		pte_val(pte) |= PTE_VALID;
+489: 	set_pte(ptep, pte);
+490: 
+491: 	return 0;
+492: }
+493: 
+494: static const struct mm_walk_ops invalid_ops = {
+495: 	.pud_entry = invalid_pud_entry,
+496: 	.pmd_entry = invalid_pmd_entry,
+497: 	.pte_entry = invalid_pte_entry,
+498: };
+499: 
+500: int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
+501: 										bool set_invalid)
+502: {
+503: 	unsigned long start, end;
+504: 	int ret;
+505: 
+506: 	ret = check_update_lm_arg(start_pfn, end_pfn);
+507: 	if (ret)
+508: 		return ret;
+509: 
+510: 	start = (unsigned long)page_to_virt(pfn_to_page(start_pfn));
+511: 	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+512: 	mmap_write_lock(&init_mm);
+513: 	walk_kernel_page_table_range(start, end,
+514: 				&invalid_ops, NULL, (void *)set_invalid);
+515: 	mmap_write_unlock(&init_mm);
+516: 	if (set_invalid)
+517: 		flush_tlb_kernel_range(start, end);
+518: 
+519: 	return 0;
+520: }
+521: EXPORT_SYMBOL_GPL(set_linear_mapping_invalid);
+
+--- arch/arm64/mm/pfn_range_alloc.c:584-605 ---
+584: int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool set_nc)
+585: {
+586: 	unsigned long start, end;
+587: 	int ret;
+588: 
+589: 	start = (unsigned long)page_to_virt(pfn_to_page(start_pfn));
+590: 	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+591: 	ret = check_update_lm_arg(start_pfn, end_pfn);
+592: 	if (ret)
+593: 		return ret;
+594: 
+595: 	mmap_write_lock(&init_mm);
+596: 	walk_kernel_page_table_range(start, end,
+597: 				&invalid_ops, NULL, (void *)true);
+598: 	flush_tlb_kernel_range(start, end);
+599: 	walk_kernel_page_table_range(start, end,
+600: 				&nc_ops, NULL, (void *)set_nc);
+601: 	mmap_write_unlock(&init_mm);
+602: 
+603: 	return 0;
+604: }
+605: EXPORT_SYMBOL_GPL(set_linear_mapping_nc);
+
+--- drivers/ub/obmm/ubmempool_allocator.c:222-239 ---
+222: 
+223: static int set_memseg_linear_mapping_invalid(struct memseg_node *node, bool set_nc)
+224: {
+225: 	int ret;
+226: 	unsigned long start_pfn, end_pfn;
+227: 
+228: 	start_pfn = PHYS_PFN(node->addr);
+229: 	end_pfn = PHYS_PFN(node->addr + node->size);
+230: 	pr_debug("call external: set_linear_mapping_invalid(set_nc=%d)\n", set_nc);
+231: 	ret = set_linear_mapping_invalid(start_pfn, end_pfn, set_nc);
+232: 	if (ret) {
+233: 		pr_err("failed to update kernel linear mapping cacheability: error=%pe.\n",
+234: 		       ERR_PTR(ret));
+235: 		return ret;
+236: 	}
+237: 	pr_debug("external called: set_linear_mapping_invalid(set_nc=%d, ret=%pe)\n",
+238: 		 set_nc, ERR_PTR(ret));
+239: 	return 0;
+
+--- drivers/ub/obmm/ubmempool_allocator.c:364-399 ---
+364: static struct memseg_node *buddy_alloc_memseg(struct conti_mem_allocator *a)
+365: {
+366: 	int ret;
+367: 	struct folio *folio;
+368: 	struct memseg_node *node = kzalloc(sizeof(*node), GFP_KERNEL);
+369: 
+370: 	if (unlikely(!node))
+371: 		return NULL;
+372: 
+373: 	folio = pfn_range_alloc(a->granu >> PAGE_SHIFT, a->nid);
+374: 	if (IS_ERR(folio)) {
+375: 		pr_debug("pfn_range_alloc(%#lx, %d) returned %ld.\n", a->granu >> PAGE_SHIFT,
+376: 			 a->nid, PTR_ERR(folio));
+377: 		pool_delay_expand(a->nid);
+378: 		goto out_free_node;
+379: 	}
+380: 
+381: 	node->size = folio_size(folio);
+382: 	node->addr = folio_pfn(folio) << PAGE_SHIFT;
+383: 	if (unlikely(node->size != a->granu)) {
+384: 		pr_err("pfn_range_alloc() returned folio smaller than expected, expect=%#zx, actual=%#zx\n",
+385: 		       a->granu, node->size);
+386: 		goto out_free_seg;
+387: 	}
+388: 
+389: 	ret = set_memseg_linear_mapping_invalid(node, true);
+390: 	if (unlikely(ret))
+391: 		goto out_free_seg;
+392: 
+393: 	return node;
+394: 
+395: out_free_seg:
+396: 	ret = pfn_range_free(folio);
+397: 	if (unlikely(ret != 0))
+398: 		pr_err("failed to free buddy folio on roll back, ret=%pe.\n", ERR_PTR(ret));
+399: out_free_node:
+
+--- drivers/ub/obmm/ubmempool_allocator.c:438-449 ---
+438: }
+439: 
+440: static char default_mempool_allocator[MAX_DEFAULT_PARAM_LENGTH] = "buddy_highmem";
+441: static char *mempool_allocator = default_mempool_allocator;
+442: module_param(mempool_allocator, charp, 0440);
+443: MODULE_PARM_DESC(mempool_allocator,
+444: 		 "OBMM mempool allocator. If not set, use buddy_highmem allocator.");
+445: static const char * const allocator_names[] = {
+446: 	"hugetlb_pmd",
+447: 	"hugetlb_pud",
+448: 	"buddy_highmem",
+449: };
+
+--- drivers/ub/obmm/ubmempool_allocator.c:501-519 ---
+501: static int init_mem_allocator_granu(enum allocator_id aid)
+502: {
+503: 	static char def_granu[MAX_DEFAULT_PARAM_LENGTH];
+504: 	char *p = mem_allocator_granu;
+505: 
+506: 	if (!mem_allocator_granu) {
+507: 		if (aid == ALLOCATOR_HUGETLB_PUD)
+508: 			__obmm_memseg_size = PUD_SIZE;
+509: 		else if (aid == ALLOCATOR_HUGETLB_PMD)
+510: 			__obmm_memseg_size = PMD_SIZE;
+511: 		else
+512: 			__obmm_memseg_size = OBMM_BASIC_GRANU;
+513: 
+514: 		print_granu(def_granu, __obmm_memseg_size);
+515: 		mem_allocator_granu = def_granu;
+516: 		return 0;
+517: 	}
+518: 
+519: 	__obmm_memseg_size = memparse(p, &p);
+
+--- kernel/dma/swiotlb.c:264-278 ---
+264: void __init swiotlb_update_mem_attributes(void)
+265: {
+266: 	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
+267: 	unsigned long bytes;
+268: 
+269: 	if (!mem->nslabs || mem->late_alloc)
+270: 		return;
+271: 	bytes = PAGE_ALIGN(mem->nslabs << IO_TLB_SHIFT);
+272: 	set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
+273: 
+274: #ifdef CONFIG_HISI_CCADA_GUEST
+275: 	if (is_realm_world() && is_swiotlb_allocated())
+276: 		io_tlb_default_mem.for_alloc = true;
+277: #endif
+278: }
+
+--- kernel/dma/swiotlb.c:329-356 ---
+329: static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
+330: 		unsigned int flags,
+331: 		int (*remap)(void *tlb, unsigned long nslabs))
+332: {
+333: 	size_t bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
+334: 	void *tlb;
+335: 	phys_addr_t align = PAGE_SIZE;
+336: 
+337: 	if (cc_platform_has_csv3()) {
+338: 		if (memblock_phys_mem_size() > SZ_2G)
+339: 			align = SZ_128M;
+340: 		else
+341: 			align = SZ_32M;
+342: 	}
+343: 
+344: 	/*
+345: 	 * By default allocate the bounce buffer memory from low memory, but
+346: 	 * allow to pick a location everywhere for hypervisors with guest
+347: 	 * memory encryption.
+348: 	 */
+349: 	if (flags & SWIOTLB_ANY)
+350: 		tlb = memblock_alloc(bytes, align);
+351: 	else
+352: 		tlb = memblock_alloc_low(bytes, align);
+353: 
+354: 	if (!tlb) {
+355: 		pr_warn("%s: Failed to allocate %zu bytes tlb structure\n",
+356: 			__func__, bytes);
+
+--- arch/arm64/include/asm/tlbflush.h:733-755 ---
+733: static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
+734: {
+735: 	const unsigned long stride = PAGE_SIZE;
+736: 	unsigned long pages;
+737: 
+738: 	start = round_down(start, stride);
+739: 	end = round_up(end, stride);
+740: 	pages = (end - start) >> PAGE_SHIFT;
+741: 
+742: 	if (__flush_tlb_range_limit_excess(start, end, pages, stride)) {
+743: 		flush_tlb_all();
+744: 		return;
+745: 	}
+746: 
+747: 	dsb(ishst);
+748: 	__flush_tlb_range_op(vaale1is, start, pages, stride, 0, 0, false);
+749: 	dsb(ish);
+750: 	isb();
+751: }
+752: 
+753: /*
+754:  * Used to invalidate the TLB (walk caches) corresponding to intermediate page
+755:  * table levels (pgd/pud/pmd).

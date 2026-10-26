@@ -1,0 +1,1916 @@
+diff --git a/arch/arm64/include/asm/cpufeature.h b/arch/arm64/include/asm/cpufeature.h
+index d424cda70354..234533debc05 100644
+--- a/arch/arm64/include/asm/cpufeature.h
++++ b/arch/arm64/include/asm/cpufeature.h
+@@ -23,6 +23,7 @@
+ #include <linux/bug.h>
+ #include <linux/jump_label.h>
+ #include <linux/kernel.h>
++#include <linux/cpumask.h>
+ 
+ /*
+  * CPU feature register tracking
+@@ -273,6 +274,14 @@ extern struct arm64_ftr_reg arm64_ftr_reg_ctrel0;
+ #define ARM64_CPUCAP_OPTIONAL_FOR_LATE_CPU	((u16)BIT(5))
+ /* Panic when a conflict is detected */
+ #define ARM64_CPUCAP_PANIC_ON_CONFLICT		((u16)BIT(6))
++/*
++ * When paired with SCOPE_LOCAL_CPU, all early CPUs must satisfy the
++ * condition. This is different from SCOPE_SYSTEM where the check is performed
++ * only once at the end of the SMP boot on the sanitised ID registers.
++ * SCOPE_SYSTEM is not suitable for cases where the capability depends on
++ * properties local to a CPU like MIDR_EL1.
++ */
++#define ARM64_CPUCAP_MATCH_ALL_EARLY_CPUS	((u16)BIT(7))
+ 
+ /*
+  * CPU errata workarounds that need to be enabled at boot time if one or
+@@ -302,6 +311,16 @@ extern struct arm64_ftr_reg arm64_ftr_reg_ctrel0;
+ 	(ARM64_CPUCAP_SCOPE_LOCAL_CPU		|	\
+ 	 ARM64_CPUCAP_OPTIONAL_FOR_LATE_CPU	|	\
+ 	 ARM64_CPUCAP_PERMITTED_FOR_LATE_CPU)
++/*
++ * CPU feature detected at boot time and present on all early CPUs. Late CPUs
++ * are permitted to have the feature even if it hasn't been enabled, although
++ * the feature will not be used by Linux in this case. If all early CPUs have
++ * the feature, then every late CPU must have it.
++ */
++#define ARM64_CPUCAP_EARLY_LOCAL_CPU_FEATURE		\
++	 (ARM64_CPUCAP_SCOPE_LOCAL_CPU		|	\
++	  ARM64_CPUCAP_PERMITTED_FOR_LATE_CPU	|	\
++	  ARM64_CPUCAP_MATCH_ALL_EARLY_CPUS)
+ 
+ /*
+  * CPU feature detected at boot time, on one or more CPUs. A late CPU
+@@ -380,6 +399,7 @@ struct arm64_cpu_capabilities {
+ 	 * method is robust against being called multiple times.
+ 	 */
+ 	const struct arm64_cpu_capabilities *match_list;
++	const struct cpumask *cpus;
+ };
+ 
+ static inline int cpucap_default_scope(const struct arm64_cpu_capabilities *cap)
+@@ -387,6 +407,11 @@ static inline int cpucap_default_scope(const struct arm64_cpu_capabilities *cap)
+ 	return cap->type & ARM64_CPUCAP_SCOPE_MASK;
+ }
+ 
++static inline bool cpucap_match_all_early_cpus(const struct arm64_cpu_capabilities *cap)
++{
++	return cap->type & ARM64_CPUCAP_MATCH_ALL_EARLY_CPUS;
++}
++
+ /*
+  * Generic helper for handling capabilities with multiple (match,enable) pairs
+  * of call backs, sharing the same capability bit.
+@@ -912,6 +937,13 @@ static inline bool system_supports_haft(void)
+ 		cpus_have_final_cap(ARM64_HAFT);
+ }
+ 
++bool cpu_supports_bbml3(void);
++
++static inline bool system_supports_bbml3(void)
++{
++	return alternative_has_cap_unlikely(ARM64_HAS_BBML3);
++}
++
+ int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt);
+ bool try_emulate_mrs(struct pt_regs *regs, u32 isn);
+ 
+diff --git a/arch/arm64/include/asm/kfence.h b/arch/arm64/include/asm/kfence.h
+index 36052893433f..16939727e98c 100644
+--- a/arch/arm64/include/asm/kfence.h
++++ b/arch/arm64/include/asm/kfence.h
+@@ -10,8 +10,6 @@
+ 
+ #include <asm/set_memory.h>
+ 
+-static inline bool arch_kfence_init_pool(void) { return true; }
+-
+ static inline bool kfence_protect_page(unsigned long addr, bool protect)
+ {
+ 	set_memory_valid(addr, 1, !protect);
+@@ -28,6 +26,7 @@ static inline bool arm64_kfence_can_set_direct_map(void)
+ 
+ 	return !kfence_early_init;
+ }
++bool arch_kfence_init_pool(void);
+ #else /* CONFIG_KFENCE */
+ static inline bool arm64_kfence_can_set_direct_map(void) { return false; }
+ #endif /* CONFIG_KFENCE */
+diff --git a/arch/arm64/include/asm/mmu.h b/arch/arm64/include/asm/mmu.h
+index 94b68850cb9f..6af4930f5c2d 100644
+--- a/arch/arm64/include/asm/mmu.h
++++ b/arch/arm64/include/asm/mmu.h
+@@ -71,10 +71,15 @@ extern void create_pgd_mapping(struct mm_struct *mm, phys_addr_t phys,
+ 			       pgprot_t prot, bool page_mappings_only);
+ extern void *fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot);
+ extern void mark_linear_text_alias_ro(void);
++extern int split_kernel_leaf_mapping(unsigned long start, unsigned long end);
++extern void init_idmap_kpti_bbml3_flag(void);
++extern void linear_map_maybe_split_to_ptes(void);
+ extern bool kaslr_requires_kpti(void);
+ 
+ #define INIT_MM_CONTEXT(name)	\
+ 	.pgd = init_pg_dir,
+ 
++extern bool page_alloc_available;
++
+ #endif	/* !__ASSEMBLY__ */
+ #endif
+diff --git a/arch/arm64/include/asm/pgtable-prot.h b/arch/arm64/include/asm/pgtable-prot.h
+index 10f10fa34c23..f7be31e275ac 100644
+--- a/arch/arm64/include/asm/pgtable-prot.h
++++ b/arch/arm64/include/asm/pgtable-prot.h
+@@ -21,11 +21,13 @@
+ #define PTE_PROT_NONE		(_AT(pteval_t, 1) << 58) /* only when !PTE_VALID */
+ 
+ /*
+- * This bit indicates that the entry is present i.e. pmd_page()
+- * still points to a valid huge page in memory even if the pmd
+- * has been invalidated.
++ * PTE_PRESENT_INVALID=1 & PTE_VALID=0 indicates that the pte's fields should be
++ * interpreted according to the HW layout by SW but any attempted HW access to
++ * the address will result in a fault. pte_present() returns true.
+  */
+-#define PMD_PRESENT_INVALID	(_AT(pteval_t, 1) << 59) /* only when !PMD_SECT_VALID */
++#define PTE_PRESENT_INVALID	(_AT(pteval_t, 1) << 59) /* only when !PTE_VALID */
++
++#define PTE_PRESENT_VALID_KERNEL (PTE_VALID | PTE_MAYBE_NG)
+ 
+ #define _PROT_DEFAULT		(PTE_TYPE_PAGE | PTE_AF | PTE_SHARED)
+ #define _PROT_SECT_DEFAULT	(PMD_TYPE_SECT | PMD_SECT_AF | PMD_SECT_S)
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 21a18b010bc9..2be956bbab97 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -121,6 +121,8 @@ static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
+ #define pte_dirty(pte)		(pte_sw_dirty(pte) || pte_hw_dirty(pte))
+ 
+ #define pte_valid(pte)		(!!(pte_val(pte) & PTE_VALID))
++#define pte_present_invalid(pte) \
++	((pte_val(pte) & (PTE_VALID | PTE_PRESENT_INVALID)) == PTE_PRESENT_INVALID)
+ /*
+  * Execute-only user mappings do not have the PTE_USER bit set. All valid
+  * kernel mappings have the PTE_UXN bit set.
+@@ -245,9 +247,18 @@ static inline pte_t pte_mknoncont(pte_t pte)
+ 	return clear_pte_bit(pte, __pgprot(PTE_CONT));
+ }
+ 
+-static inline pte_t pte_mkpresent(pte_t pte)
++static inline pte_t pte_mkvalid_k(pte_t pte)
+ {
+-	return set_pte_bit(pte, __pgprot(PTE_VALID));
++	pte = clear_pte_bit(pte, __pgprot(PTE_PRESENT_INVALID));
++	pte = set_pte_bit(pte, __pgprot(PTE_PRESENT_VALID_KERNEL));
++	return pte;
++}
++
++static inline pte_t pte_mkinvalid(pte_t pte)
++{
++	pte = set_pte_bit(pte, __pgprot(PTE_PRESENT_INVALID));
++	pte = clear_pte_bit(pte, __pgprot(PTE_VALID));
++	return pte;
+ }
+ 
+ static inline pte_t pte_clrhuge(pte_t pte)
+@@ -264,6 +275,11 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
+ 	return __pmd(pmd_val(pmd) | PMD_SECT_CONT);
+ }
+ 
++static inline pmd_t pmd_mknoncont(pmd_t pmd)
++{
++	return __pmd(pmd_val(pmd) & ~PMD_SECT_CONT);
++}
++
+ static inline pte_t pte_mkdevmap(pte_t pte)
+ {
+ 	return set_pte_bit(pte, __pgprot(PTE_DEVMAP | PTE_SPECIAL));
+@@ -472,7 +488,7 @@ static inline int pmd_protnone(pmd_t pmd)
+ }
+ #endif
+ 
+-#define pmd_present_invalid(pmd)     (!!(pmd_val(pmd) & PMD_PRESENT_INVALID))
++#define pmd_present_invalid(pmd)	pte_present_invalid(pmd_pte(pmd))
+ 
+ static inline int pmd_present(pmd_t pmd)
+ {
+@@ -502,14 +518,8 @@ static inline int pmd_trans_huge(pmd_t pmd)
+ #define pmd_mkclean(pmd)	pte_pmd(pte_mkclean(pmd_pte(pmd)))
+ #define pmd_mkdirty(pmd)	pte_pmd(pte_mkdirty(pmd_pte(pmd)))
+ #define pmd_mkyoung(pmd)	pte_pmd(pte_mkyoung(pmd_pte(pmd)))
+-
+-static inline pmd_t pmd_mkinvalid(pmd_t pmd)
+-{
+-	pmd = set_pmd_bit(pmd, __pgprot(PMD_PRESENT_INVALID));
+-	pmd = clear_pmd_bit(pmd, __pgprot(PMD_SECT_VALID));
+-
+-	return pmd;
+-}
++#define pmd_mkvalid_k(pmd)	pte_pmd(pte_mkvalid_k(pmd_pte(pmd)))
++#define pmd_mkinvalid(pmd)	pte_pmd(pte_mkinvalid(pmd_pte(pmd)))
+ 
+ #define pmd_thp_or_huge(pmd)	(pmd_huge(pmd) || pmd_trans_huge(pmd))
+ 
+@@ -546,6 +556,8 @@ extern bool nohugepfnmap;
+ 
+ #define pud_young(pud)		pte_young(pud_pte(pud))
+ #define pud_mkyoung(pud)	pte_pud(pte_mkyoung(pud_pte(pud)))
++#define pud_mkwrite_novma(pud)	pte_pud(pte_mkwrite_novma(pud_pte(pud)))
++#define pud_mkvalid_k(pud)	pte_pud(pte_mkvalid_k(pud_pte(pud)))
+ #define pud_write(pud)		pte_write(pud_pte(pud))
+ 
+ #define pud_mkhuge(pud)		(__pud(pud_val(pud) & ~PUD_TABLE_BIT))
+@@ -1142,6 +1154,7 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
+  *	bits 3-7:	swap type
+  *	bits 8-57:	swap offset
+  *	bit  58:	PTE_PROT_NONE (must be zero)
++ *	bit  59:	PTE_PRESENT_INVALID (must be zero)
+  */
+ #define __SWP_TYPE_SHIFT	3
+ #define __SWP_TYPE_BITS		5
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index 3e0e7f04d319..40abd5ae97b0 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -85,6 +85,7 @@
+ #include <asm/insn.h>
+ #include <asm/kvm_host.h>
+ #include <asm/mmu_context.h>
++#include <asm/mmu.h>
+ #include <asm/mpam.h>
+ #include <asm/mte.h>
+ #include <asm/nmi.h>
+@@ -1855,16 +1856,15 @@ void create_kpti_ng_temp_pgd(pgd_t *pgdir, phys_addr_t phys, unsigned long virt,
+ 			     phys_addr_t size, pgprot_t prot,
+ 			     phys_addr_t (*pgtable_alloc)(int), int flags);
+ 
+-static phys_addr_t kpti_ng_temp_alloc;
++static phys_addr_t __initdata kpti_ng_temp_alloc;
+ 
+-static phys_addr_t kpti_ng_pgd_alloc(int shift)
++static phys_addr_t __init kpti_ng_pgd_alloc(int shift)
+ {
+ 	kpti_ng_temp_alloc -= PAGE_SIZE;
+ 	return kpti_ng_temp_alloc;
+ }
+ 
+-static void
+-kpti_install_ng_mappings(const struct arm64_cpu_capabilities *__unused)
++static int __init __kpti_install_ng_mappings(void *__unused)
+ {
+ 	typedef void (kpti_remap_fn)(int, int, phys_addr_t, unsigned long);
+ 	extern kpti_remap_fn idmap_kpti_install_ng_mappings;
+@@ -1877,20 +1877,6 @@ kpti_install_ng_mappings(const struct arm64_cpu_capabilities *__unused)
+ 	pgd_t *kpti_ng_temp_pgd;
+ 	u64 alloc = 0;
+ 
+-	if (__this_cpu_read(this_cpu_vector) == vectors) {
+-		const char *v = arm64_get_bp_hardening_vector(EL1_VECTOR_KPTI);
+-
+-		__this_cpu_write(this_cpu_vector, v);
+-	}
+-
+-	/*
+-	 * We don't need to rewrite the page-tables if either we've done
+-	 * it already or we have KASLR enabled and therefore have not
+-	 * created any global mappings at all.
+-	 */
+-	if (arm64_use_ng_mappings)
+-		return;
+-
+ 	remap_fn = (void *)__pa_symbol(idmap_kpti_install_ng_mappings);
+ 
+ 	if (!cpu) {
+@@ -1927,14 +1913,44 @@ kpti_install_ng_mappings(const struct arm64_cpu_capabilities *__unused)
+ 		free_pages(alloc, order);
+ 		arm64_use_ng_mappings = true;
+ 	}
++
++	return 0;
++}
++
++static void __init kpti_install_ng_mappings(void)
++{
++	/* Check whether KPTI is going to be used */
++	if (!cpus_have_cap(ARM64_UNMAP_KERNEL_AT_EL0))
++		return;
++
++	/*
++	 * We don't need to rewrite the page-tables if either we've done
++	 * it already or we have KASLR enabled and therefore have not
++	 * created any global mappings at all.
++	 */
++	if (arm64_use_ng_mappings)
++		return;
++
++	init_idmap_kpti_bbml3_flag();
++	stop_machine(__kpti_install_ng_mappings, NULL, cpu_online_mask);
+ }
++
+ #else
+-static void
+-kpti_install_ng_mappings(const struct arm64_cpu_capabilities *__unused)
++static inline void kpti_install_ng_mappings(void)
+ {
+ }
+ #endif	/* CONFIG_UNMAP_KERNEL_AT_EL0 */
+ 
++static void cpu_enable_kpti(struct arm64_cpu_capabilities const *cap)
++{
++	if (__this_cpu_read(this_cpu_vector) == vectors) {
++		const char *v = arm64_get_bp_hardening_vector(EL1_VECTOR_KPTI);
++
++		__this_cpu_write(this_cpu_vector, v);
++	}
++
++}
++
+ static int __init parse_kpti(char *str)
+ {
+ 	bool enabled;
+@@ -2046,8 +2062,6 @@ int get_cpu_with_amu_feat(void)
+ static void cpu_amu_enable(struct arm64_cpu_capabilities const *cap)
+ {
+ 	if (has_cpuid_feature(cap, SCOPE_LOCAL_CPU)) {
+-		pr_info("detected CPU%d: Activity Monitors Unit (AMU)\n",
+-			smp_processor_id());
+ 		cpumask_set_cpu(smp_processor_id(), &amu_cpus);
+ 
+ 		/* 0 reference values signal broken/disabled counters */
+@@ -2127,6 +2141,28 @@ static bool hvhe_possible(const struct arm64_cpu_capabilities *entry,
+ 	return cpuid_feature_extract_unsigned_field(val, ARM64_SW_FEATURE_OVERRIDE_HVHE);
+ }
+ 
++bool cpu_supports_bbml3(void)
++{
++	/* CPUs that support BBML3 but dont advertise through ID_AA64MMFR2_EL1 */
++	static const struct midr_range supports_bbml3_list[] = {
++		MIDR_REV_RANGE(MIDR_CORTEX_X4, 0, 3, 0xf),
++		MIDR_REV_RANGE(MIDR_NEOVERSE_V3, 0, 2, 0xf),
++		MIDR_ALL_VERSIONS(MIDR_HISI_HIP13),
++		{}
++	};
++	u64 mmfr2 = __read_sysreg_by_encoding(SYS_ID_AA64MMFR2_EL1);
++
++	if (SYS_FIELD_GET(ID_AA64MMFR2_EL1, BBM, mmfr2) >= ID_AA64MMFR2_EL1_BBM_3)
++		return true;
++
++	return is_midr_in_range_list(supports_bbml3_list);
++}
++
++static bool has_bbml3(const struct arm64_cpu_capabilities *caps, int scope)
++{
++	return cpu_supports_bbml3();
++}
++
+ #ifdef CONFIG_ARM64_PAN
+ static void cpu_enable_pan(const struct arm64_cpu_capabilities *__unused)
+ {
+@@ -2786,7 +2822,7 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
+ 		.desc = "Kernel page table isolation (KPTI)",
+ 		.capability = ARM64_UNMAP_KERNEL_AT_EL0,
+ 		.type = ARM64_CPUCAP_BOOT_RESTRICTED_CPU_LOCAL_FEATURE,
+-		.cpu_enable = kpti_install_ng_mappings,
++		.cpu_enable = cpu_enable_kpti,
+ 		.matches = unmap_kernel_at_el0,
+ 		/*
+ 		 * The ID feature fields below are used to indicate that
+@@ -2840,16 +2876,12 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
+ #endif /* CONFIG_ARM64_RAS_EXTN */
+ #ifdef CONFIG_ARM64_AMU_EXTN
+ 	{
+-		/*
+-		 * The feature is enabled by default if CONFIG_ARM64_AMU_EXTN=y.
+-		 * Therefore, don't provide .desc as we don't want the detection
+-		 * message to be shown until at least one CPU is detected to
+-		 * support the feature.
+-		 */
++		.desc = "Activity Monitors Unit (AMU)",
+ 		.capability = ARM64_HAS_AMU_EXTN,
+ 		.type = ARM64_CPUCAP_WEAK_LOCAL_CPU_FEATURE,
+ 		.matches = has_amu,
+ 		.cpu_enable = cpu_amu_enable,
++		.cpus = &amu_cpus,
+ 		ARM64_CPUID_FIELDS(ID_AA64PFR0_EL1, AMU, IMP)
+ 	},
+ #endif /* CONFIG_ARM64_AMU_EXTN */
+@@ -3169,6 +3201,12 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
+ 		.matches = has_cpuid_feature,
+ 		ARM64_CPUID_FIELDS(ID_AA64MMFR2_EL1, EVT, IMP)
+ 	},
++	{
++		.desc = "BBM Level 3",
++		.capability = ARM64_HAS_BBML3,
++		.type = ARM64_CPUCAP_EARLY_LOCAL_CPU_FEATURE,
++		.matches = has_bbml3,
++	},
+ 	{
+ 		.desc = "Non-maskable Interrupts present",
+ 		.capability = ARM64_HAS_NMI,
+@@ -3598,18 +3636,49 @@ static void update_cpu_capabilities(u16 scope_mask)
+ 
+ 	scope_mask &= ARM64_CPUCAP_SCOPE_MASK;
+ 	for (i = 0; i < ARM64_NCAPS; i++) {
++		bool match_all = false;
++		bool caps_set = false;
++		bool boot_cpu = false;
++
+ 		caps = cpucap_ptrs[i];
+-		if (!caps || !(caps->type & scope_mask) ||
+-		    cpus_have_cap(caps->capability) ||
+-		    !caps->matches(caps, cpucap_default_scope(caps)))
++		if (!caps || !(caps->type & scope_mask))
++			continue;
++
++		match_all = cpucap_match_all_early_cpus(caps);
++		caps_set = cpus_have_cap(caps->capability);
++		boot_cpu = scope_mask & SCOPE_BOOT_CPU;
++
++		/*
++		 * Unless it's a match-all CPUs feature, avoid probing if
++		 * already detected.
++		 */
++		if (!match_all && caps_set)
+ 			continue;
+ 
+-		if (caps->desc)
++		/*
++		 * A match-all CPUs capability is only set when probing the
++		 * boot CPU. It may be cleared subsequently if not detected on
++		 * secondary ones.
++		 */
++		if (match_all && !caps_set && !boot_cpu)
++			continue;
++
++		if (!caps->matches(caps, cpucap_default_scope(caps))) {
++			if (match_all)
++				__clear_bit(caps->capability, system_cpucaps);
++			continue;
++		}
++
++		/*
++		 * Match-all CPUs capabilities are logged later when the
++		 * system capabilities are finalised.
++		 */
++		if (!match_all && caps->desc && !caps->cpus)
+ 			pr_info("detected: %s\n", caps->desc);
+ 
+ 		__set_bit(caps->capability, system_cpucaps);
+ 
+-		if ((scope_mask & SCOPE_BOOT_CPU) && (caps->type & SCOPE_BOOT_CPU))
++		if (boot_cpu && (caps->type & SCOPE_BOOT_CPU))
+ 			set_bit(caps->capability, boot_cpucaps);
+ 	}
+ }
+@@ -3960,6 +4029,7 @@ unsigned long cpu_get_elf_hwcap3(void)
+ 
+ static void __init setup_system_capabilities(void)
+ {
++	int i;
+ 	/*
+ 	 * We have finalised the system-wide safe feature
+ 	 * registers, finalise the capabilities that depend
+@@ -3968,6 +4038,26 @@ static void __init setup_system_capabilities(void)
+ 	 */
+ 	update_cpu_capabilities(SCOPE_SYSTEM);
+ 	enable_cpu_capabilities(SCOPE_ALL & ~SCOPE_BOOT_CPU);
++
++	for (i = 0; i < ARM64_NCAPS; i++) {
++		const struct arm64_cpu_capabilities *caps = cpucap_ptrs[i];
++
++		if (!caps || !caps->desc)
++			continue;
++
++		/*
++		 * Log any cpucaps with a cpumask as these aren't logged by
++		 * update_cpu_capabilities().
++		 */
++		if (caps->cpus && cpumask_any(caps->cpus) < nr_cpu_ids)
++			pr_info("detected: %s on CPU%*pbl\n",
++				caps->desc, cpumask_pr_args(caps->cpus));
++
++		/* Log match-all CPUs capabilities */
++		if (cpucap_match_all_early_cpus(caps) &&
++		    cpus_have_cap(caps->capability))
++			pr_info("detected: %s\n", caps->desc);
++	}
+ }
+ 
+ void __init setup_cpu_features(void)
+@@ -3986,6 +4076,9 @@ void __init setup_cpu_features(void)
+ 	if (system_uses_ttbr0_pan())
+ 		pr_info("emulated: Privileged Access Never (PAN) using TTBR0_EL1 switching\n");
+ 
++	linear_map_maybe_split_to_ptes();
++	kpti_install_ng_mappings();
++
+ 	sve_setup();
+ 	sme_setup();
+ 	minsigstksz_setup();
+diff --git a/arch/arm64/mm/contpte.c b/arch/arm64/mm/contpte.c
+index 2925ecf5b26f..bf6de7de1e25 100644
+--- a/arch/arm64/mm/contpte.c
++++ b/arch/arm64/mm/contpte.c
+@@ -68,7 +68,139 @@ static void contpte_convert(struct mm_struct *mm, unsigned long addr,
+ 			pte = pte_mkyoung(pte);
+ 	}
+ 
+-	__flush_tlb_range(&vma, start_addr, addr, PAGE_SIZE, true, 3);
++	/*
++	 * On eliding the __tlb_flush_range() under BBML3:
++	 *
++	 * NOTE: Instead of using N=16 as the contiguous block length, we use
++	 *       N=4 for clarity.
++	 *
++	 * NOTE: 'n' and 'c' are used to denote the "contiguous bit" being
++	 *       unset and set, respectively.
++	 *
++	 * We worry about two cases where contiguous bit is used:
++	 *  - When folding N smaller non-contiguous ptes as 1 contiguous block.
++	 *  - When unfolding a contiguous block into N smaller non-contiguous ptes.
++	 *
++	 * Currently, the BBML0 folding case looks as follows:
++	 *
++	 *  0) Initial page-table layout:
++	 *
++	 *   +----+----+----+----+
++	 *   |RO,n|RO,n|RO,n|RW,n| <--- last page being set as RO
++	 *   +----+----+----+----+
++	 *
++	 *  1) Aggregate AF + dirty flags using __ptep_get_and_clear():
++	 *
++	 *   +----+----+----+----+
++	 *   |  0 |  0 |  0 |  0 |
++	 *   +----+----+----+----+
++	 *
++	 *  2) __flush_tlb_range():
++	 *
++	 *   |____ tlbi + dsb ____|
++	 *
++	 *  3) __set_ptes() to repaint contiguous block:
++	 *
++	 *   +----+----+----+----+
++	 *   |RO,c|RO,c|RO,c|RO,c|
++	 *   +----+----+----+----+
++	 *
++	 *  4) The kernel will eventually __flush_tlb() for changed page:
++	 *
++	 *                  |____| <--- tlbi + dsb
++	 *
++	 * As expected, the intermediate tlbi+dsb ensures that other PEs
++	 * only ever see an invalid (0) entry, or the new contiguous TLB entry.
++	 * The final tlbi+dsb will always throw away the newly installed
++	 * contiguous TLB entry, which is a micro-optimisation opportunity,
++	 * but does not affect correctness.
++	 *
++	 * In the BBML3 case, the change is avoiding the intermediate tlbi+dsb.
++	 * This means a few things, but notably other PEs will still "see" any
++	 * stale cached TLB entries. This could lead to a "contiguous bit
++	 * misprogramming" issue until the final tlbi+dsb of the changed page,
++	 * which would clear out both the stale (RW,n) entry and the new (RO,c)
++	 * contiguous entry installed in its place.
++	 *
++	 * What this is saying, is the following:
++	 *
++	 *  +----+----+----+----+
++	 *  |RO,n|RO,n|RO,n|RW,n| <--- old page tables, all non-contiguous
++	 *  +----+----+----+----+
++	 *
++	 *  +----+----+----+----+
++	 *  |RO,c|RO,c|RO,c|RO,c| <--- new page tables, all contiguous
++	 *  +----+----+----+----+
++	 *   /\
++	 *   ||
++	 *
++	 *  If both the old single (RW,n) and new contiguous (RO,c) TLB entries
++	 *  are present, and a write is made to this address, do we fault or
++	 *  is the write permitted (via amalgamation)?
++	 *
++	 * With BBML3 implemented, no TLB conflict abort is raised and the OA,
++	 * access permissions and memory attributes produced is one of the cached
++	 * TLB entries, but never amalgamate.
++	 *
++	 * Thus, as the page tables are only considered "consistent" after
++	 * the final tlbi+dsb (which evicts both the single stale (RW,n) TLB
++	 * entry as well as the new contiguous (RO,c) TLB entry), omitting the
++	 * initial tlbi+dsb is correct.
++	 *
++	 * It is also important to note that at the end of the BBML3 folding
++	 * case, we are still left with potentially all N TLB entries still
++	 * cached (the N-1 non-contiguous ptes, and the single contiguous
++	 * block). However, over time, natural TLB pressure will cause the
++	 * non-contiguous pte TLB entries to be flushed, leaving only the
++	 * contiguous block TLB entry. This means that omitting the tlbi+dsb is
++	 * not only correct, but also keeps our eventual performance benefits.
++	 *
++	 * For the unfolding case, BBML0 looks as follows:
++	 *
++	 *  0) Initial page-table layout:
++	 *
++	 *   +----+----+----+----+
++	 *   |RW,c|RW,c|RW,c|RW,c| <--- last page being set as RO
++	 *   +----+----+----+----+
++	 *
++	 *  1) Aggregate AF + dirty flags using __ptep_get_and_clear():
++	 *
++	 *   +----+----+----+----+
++	 *   |  0 |  0 |  0 |  0 |
++	 *   +----+----+----+----+
++	 *
++	 *  2) __flush_tlb_range():
++	 *
++	 *   |____ tlbi + dsb ____|
++	 *
++	 *  3) __set_ptes() to repaint as non-contiguous:
++	 *
++	 *   +----+----+----+----+
++	 *   |RW,n|RW,n|RW,n|RW,n|
++	 *   +----+----+----+----+
++	 *
++	 *  4) Update changed page permissions:
++	 *
++	 *   +----+----+----+----+
++	 *   |RW,n|RW,n|RW,n|RO,n| <--- last page permissions set
++	 *   +----+----+----+----+
++	 *
++	 *  5) The kernel will eventually __flush_tlb() for changed page:
++	 *
++	 *                  |____| <--- tlbi + dsb
++	 *
++	 * For BBML3, we again remove the intermediate tlbi+dsb. Here, there
++	 * are no issues, as the final tlbi+dsb covering the changed page is
++	 * guaranteed to remove the original large contiguous (RW,c) TLB entry,
++	 * as well as the intermediate (RW,n) TLB entry; the next access will
++	 * install the new (RO,n) TLB entry and the page tables are only
++	 * considered "consistent" after the final tlbi+dsb, so software must
++	 * be prepared for this inconsistency prior to finishing the mm dance
++	 * regardless.
++	 */
++
++	if (!system_supports_bbml3())
++		__flush_tlb_range(&vma, start_addr, addr, PAGE_SIZE, true, 3);
+ 
+ 	__set_ptes(mm, start_addr, start_ptep, pte, CONT_PTES);
+ }
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index 0d1b0415bf87..0639aeb019b2 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -603,6 +603,8 @@ void __init bootmem_init(void)
+ 	memblock_dump_all();
+ }
+ 
++bool page_alloc_available __ro_after_init;
++
+ /*
+  * mem_init() marks the free areas in the mem_map and tells us how much memory
+  * is free.  This is done after various parts of the system have claimed their
+@@ -622,7 +624,6 @@ void __init mem_init(void)
+ 		swiotlb = true;
+ 
+ 	swiotlb_init(swiotlb, flags);
+-	swiotlb_update_mem_attributes();
+ 
+ 	swiotlb_cvm_update_mem_attributes();
+ 
+@@ -641,6 +642,9 @@ void __init mem_init(void)
+ 	/* this will put all unused low memory onto the freelists */
+ 	memblock_free_all();
+ 
++	page_alloc_available = true;
++	swiotlb_update_mem_attributes();
++
+ 	/*
+ 	 * Check boundaries twice: Some fundamental inconsistencies can be
+ 	 * detected at build time already.
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index 2820748d7152..0c330b5aa8ea 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -25,6 +25,8 @@
+ #include <linux/vmalloc.h>
+ #include <linux/set_memory.h>
+ #include <linux/kfence.h>
++#include <linux/pagewalk.h>
++#include <linux/stop_machine.h>
+ #include <linux/numa_remote.h>
+ #include "internal.h"
+ 
+@@ -425,6 +427,8 @@ void create_kpti_ng_temp_pgd(pgd_t *pgdir, phys_addr_t phys, unsigned long virt,
+ 			     phys_addr_t (*pgtable_alloc)(int), int flags);
+ #endif
+ 
++#define INVALID_PHYS_ADDR	(-1ULL)
++
+ static phys_addr_t __pgd_pgtable_alloc(int shift)
+ {
+ 	/* Page is zeroed by init_clear_pgtable() so don't duplicate effort. */
+@@ -455,6 +459,434 @@ static phys_addr_t pgd_pgtable_alloc(int shift)
+ 	return pa;
+ }
+ 
++static phys_addr_t
++try_pgd_pgtable_alloc_init_mm(gfp_t gfp)
++{
++	void *ptr;
++
++	ptr = (void *)__get_free_page(gfp & ~__GFP_ZERO);
++	if (!ptr)
++		return INVALID_PHYS_ADDR;
++
++	return __pa(ptr);
++}
++
++static void split_contpte(pte_t *ptep)
++{
++	int i;
++
++	ptep = PTR_ALIGN_DOWN(ptep, sizeof(*ptep) * CONT_PTES);
++	for (i = 0; i < CONT_PTES; i++, ptep++)
++		__set_pte(ptep, pte_mknoncont(__ptep_get(ptep)));
++}
++
++static int split_pmd(pmd_t *pmdp, pmd_t pmd, gfp_t gfp, bool to_cont)
++{
++	pmdval_t tableprot = PMD_TYPE_TABLE | PMD_TABLE_UXN | PMD_TABLE_AF;
++	unsigned long pfn = pmd_pfn(pmd);
++	pgprot_t prot = pmd_pgprot(pmd);
++	phys_addr_t pte_phys;
++	pte_t *ptep;
++	int i;
++
++	pte_phys = try_pgd_pgtable_alloc_init_mm(gfp);
++	if (pte_phys == INVALID_PHYS_ADDR)
++		return -ENOMEM;
++	ptep = (pte_t *)phys_to_virt(pte_phys);
++
++	if (pgprot_val(prot) & PMD_SECT_PXN)
++		tableprot |= PMD_TABLE_PXN;
++
++	prot = __pgprot((pgprot_val(prot) & ~PTE_TYPE_MASK) | PTE_TYPE_PAGE);
++	if (!pmd_valid(pmd))
++		prot = pte_pgprot(pte_mkinvalid(pfn_pte(0, prot)));
++	prot = __pgprot(pgprot_val(prot) & ~PTE_CONT);
++	if (to_cont)
++		prot = __pgprot(pgprot_val(prot) | PTE_CONT);
++
++	for (i = 0; i < PTRS_PER_PTE; i++, ptep++, pfn++)
++		__set_pte(ptep, pfn_pte(pfn, prot));
++
++	/*
++	 * Ensure the pte entries are visible to the table walker by the time
++	 * the pmd entry that points to the ptes is visible.
++	 */
++	dsb(ishst);
++	__pmd_populate(pmdp, pte_phys, tableprot);
++
++	return 0;
++}
++
++static void split_contpmd(pmd_t *pmdp)
++{
++	int i;
++
++	pmdp = PTR_ALIGN_DOWN(pmdp, sizeof(*pmdp) * CONT_PMDS);
++	for (i = 0; i < CONT_PMDS; i++, pmdp++)
++		set_pmd(pmdp, pmd_mknoncont(pmdp_get(pmdp)));
++}
++
++static int split_pud(pud_t *pudp, pud_t pud, gfp_t gfp, bool to_cont)
++{
++	pudval_t tableprot = PUD_TYPE_TABLE | PUD_TABLE_UXN | PUD_TABLE_AF;
++	unsigned int step = PMD_SIZE >> PAGE_SHIFT;
++	unsigned long pfn = pud_pfn(pud);
++	pgprot_t prot = pud_pgprot(pud);
++	phys_addr_t pmd_phys;
++	pmd_t *pmdp;
++	int i;
++
++	pmd_phys = try_pgd_pgtable_alloc_init_mm(gfp);
++	if (pmd_phys == INVALID_PHYS_ADDR)
++		return -ENOMEM;
++	pmdp = (pmd_t *)phys_to_virt(pmd_phys);
++
++	if (pgprot_val(prot) & PMD_SECT_PXN)
++		tableprot |= PUD_TABLE_PXN;
++
++	prot = __pgprot((pgprot_val(prot) & ~PMD_TYPE_MASK) | PMD_TYPE_SECT);
++	if (!pud_valid(pud))
++		prot = pmd_pgprot(pmd_mkinvalid(pfn_pmd(0, prot)));
++	prot = __pgprot(pgprot_val(prot) & ~PTE_CONT);
++	if (to_cont)
++		prot = __pgprot(pgprot_val(prot) | PTE_CONT);
++
++	for (i = 0; i < PTRS_PER_PMD; i++, pmdp++, pfn += step)
++		set_pmd(pmdp, pfn_pmd(pfn, prot));
++
++	/*
++	 * Ensure the pmd entries are visible to the table walker by the time
++	 * the pud entry that points to the pmds is visible.
++	 */
++	dsb(ishst);
++	__pud_populate(pudp, pmd_phys, tableprot);
++
++	return 0;
++}
++
++static int split_kernel_leaf_mapping_locked(unsigned long addr)
++{
++	pgd_t *pgdp, pgd;
++	p4d_t *p4dp, p4d;
++	pud_t *pudp, pud;
++	pmd_t *pmdp, pmd;
++	pte_t *ptep, pte;
++	int ret = 0;
++
++	/*
++	 * PGD: If addr is PGD aligned then addr already describes a leaf
++	 * boundary. If not present then there is nothing to split.
++	 */
++	if (ALIGN_DOWN(addr, PGDIR_SIZE) == addr)
++		goto out;
++	pgdp = pgd_offset_k(addr);
++	pgd = pgdp_get(pgdp);
++	if (!pgd_present(pgd))
++		goto out;
++
++	/*
++	 * P4D: If addr is P4D aligned then addr already describes a leaf
++	 * boundary. If not present then there is nothing to split.
++	 */
++	if (ALIGN_DOWN(addr, P4D_SIZE) == addr)
++		goto out;
++	p4dp = p4d_offset(pgdp, addr);
++	p4d = p4dp_get(p4dp);
++	if (!p4d_present(p4d))
++		goto out;
++
++	/*
++	 * PUD: If addr is PUD aligned then addr already describes a leaf
++	 * boundary. If not present then there is nothing to split. Otherwise,
++	 * if we have a pud leaf, split to contpmd.
++	 */
++	if (ALIGN_DOWN(addr, PUD_SIZE) == addr)
++		goto out;
++	pudp = pud_offset(p4dp, addr);
++	pud = pudp_get(pudp);
++	if (!pud_present(pud))
++		goto out;
++	if (pud_leaf(pud)) {
++		ret = split_pud(pudp, pud, GFP_PGTABLE_KERNEL, true);
++		if (ret)
++			goto out;
++	}
++
++	/*
++	 * CONTPMD: If addr is CONTPMD aligned then addr already describes a
++	 * leaf boundary. If not present then there is nothing to split.
++	 * Otherwise, if we have a contpmd leaf, split to pmd.
++	 */
++	if (ALIGN_DOWN(addr, CONT_PMD_SIZE) == addr)
++		goto out;
++	pmdp = pmd_offset(pudp, addr);
++	pmd = pmdp_get(pmdp);
++	if (!pmd_present(pmd))
++		goto out;
++	if (pmd_leaf(pmd)) {
++		if (pmd_cont(pmd))
++			split_contpmd(pmdp);
++		/*
++		 * PMD: If addr is PMD aligned then addr already describes a
++		 * leaf boundary. Otherwise, split to contpte.
++		 */
++		if (ALIGN_DOWN(addr, PMD_SIZE) == addr)
++			goto out;
++		ret = split_pmd(pmdp, pmd, GFP_PGTABLE_KERNEL, true);
++		if (ret)
++			goto out;
++	}
++
++	/*
++	 * CONTPTE: If addr is CONTPTE aligned then addr already describes a
++	 * leaf boundary. If not present then there is nothing to split.
++	 * Otherwise, if we have a contpte leaf, split to pte.
++	 */
++	if (ALIGN_DOWN(addr, CONT_PTE_SIZE) == addr)
++		goto out;
++	ptep = pte_offset_kernel(pmdp, addr);
++	pte = __ptep_get(ptep);
++	if (!pte_present(pte))
++		goto out;
++	if (pte_cont(pte))
++		split_contpte(ptep);
++
++out:
++	return ret;
++}
++
++static inline bool force_pte_mapping(void)
++{
++	const bool bbml3 = system_capabilities_finalized() ?
++		system_supports_bbml3() : cpu_supports_bbml3();
++
++	if (debug_pagealloc_enabled())
++		return true;
++	if (bbml3)
++		return false;
++	return rodata_full || arm64_kfence_can_set_direct_map() || is_realm_world();
++}
++
++static DEFINE_MUTEX(pgtable_split_lock);
++static bool linear_map_requires_bbml3;
++
++int split_kernel_leaf_mapping(unsigned long start, unsigned long end)
++{
++	int ret;
++
++	/*
++	 * If the region is within a pte-mapped area, there is no need to try to
++	 * split. Additionally, CONFIG_DEBUG_PAGEALLOC and CONFIG_KFENCE may
++	 * change permissions from atomic context so for those cases (which are
++	 * always pte-mapped), we must not go any further because taking the
++	 * mutex below may sleep. Do not call force_pte_mapping() here because
++	 * it could return a confusing result if called from a secondary cpu
++	 * prior to finalizing caps. Instead, linear_map_requires_bbml3 gives us
++	 * what we need.
++	 */
++	if (!linear_map_requires_bbml3 || is_kfence_address((void *)start))
++		return 0;
++
++	if (!system_supports_bbml3()) {
++		/*
++		 * BBML3 systems should not be trying to change
++		 * permissions on anything that is not pte-mapped in the first
++		 * place. Just return early and let the permission change code
++		 * raise a warning if not already pte-mapped.
++		 */
++		if (system_capabilities_finalized())
++			return 0;
++
++		/*
++		 * Boot-time: split_kernel_leaf_mapping_locked() allocates from
++		 * page allocator. Can't split until it's available.
++		 */
++		if (WARN_ON(!page_alloc_available))
++			return -EBUSY;
++
++		/*
++		 * Boot-time: Started secondary cpus but don't know if they
++		 * support BBML3 yet. Can't allow splitting in this window
++		 * in case they don't.
++		 */
++		if (WARN_ON(num_online_cpus() > 1))
++			return -EBUSY;
++	}
++
++	/*
++	 * Ensure start and end are at least page-aligned since this is the
++	 * finest granularity we can split to.
++	 */
++	if (start != PAGE_ALIGN(start) || end != PAGE_ALIGN(end))
++		return -EINVAL;
++
++	mutex_lock(&pgtable_split_lock);
++	arch_enter_lazy_mmu_mode();
++
++	/*
++	 * The split_kernel_leaf_mapping_locked() may sleep, it is not a
++	 * problem for ARM64 since ARM64's lazy MMU implementation allows
++	 * sleeping.
++	 *
++	 * Optimize for the common case of splitting out a single page from a
++	 * larger mapping. Here we can just split on the "least aligned" of
++	 * start and end and this will guarantee that there must also be a split
++	 * on the more aligned address since the both addresses must be in the
++	 * same contpte block and it must have been split to ptes.
++	 */
++	if (end - start == PAGE_SIZE) {
++		start = __ffs(start) < __ffs(end) ? start : end;
++		ret = split_kernel_leaf_mapping_locked(start);
++	} else {
++		ret = split_kernel_leaf_mapping_locked(start);
++		if (!ret)
++			ret = split_kernel_leaf_mapping_locked(end);
++	}
++
++	arch_leave_lazy_mmu_mode();
++	mutex_unlock(&pgtable_split_lock);
++	return ret;
++}
++
++static int split_to_ptes_pud_entry(pud_t *pudp, unsigned long addr,
++				   unsigned long next, struct mm_walk *walk)
++{
++	gfp_t gfp = *(gfp_t *)walk->private;
++	pud_t pud = pudp_get(pudp);
++	int ret = 0;
++
++	if (pud_leaf(pud))
++		ret = split_pud(pudp, pud, gfp, false);
++
++	return ret;
++}
++
++static int split_to_ptes_pmd_entry(pmd_t *pmdp, unsigned long addr,
++				   unsigned long next, struct mm_walk *walk)
++{
++	gfp_t gfp = *(gfp_t *)walk->private;
++	pmd_t pmd = pmdp_get(pmdp);
++	int ret = 0;
++
++	if (pmd_leaf(pmd)) {
++		if (pmd_cont(pmd))
++			split_contpmd(pmdp);
++		ret = split_pmd(pmdp, pmd, gfp, false);
++
++		/*
++		 * We have split the pmd directly to ptes so there is no need to
++		 * visit each pte to check if they are contpte.
++		 */
++		walk->action = ACTION_CONTINUE;
++	}
++
++	return ret;
++}
++
++static int split_to_ptes_pte_entry(pte_t *ptep, unsigned long addr,
++				   unsigned long next, struct mm_walk *walk)
++{
++	pte_t pte = __ptep_get(ptep);
++
++	if (pte_cont(pte))
++		split_contpte(ptep);
++
++	return 0;
++}
++
++static const struct mm_walk_ops split_to_ptes_ops = {
++	.pud_entry	= split_to_ptes_pud_entry,
++	.pmd_entry	= split_to_ptes_pmd_entry,
++	.pte_entry	= split_to_ptes_pte_entry,
++};
++
++static int range_split_to_ptes(unsigned long start, unsigned long end, gfp_t gfp)
++{
++	int ret;
++
++	arch_enter_lazy_mmu_mode();
++	ret = walk_kernel_page_table_range_lockless(start, end,
++					&split_to_ptes_ops, NULL, &gfp);
++	arch_leave_lazy_mmu_mode();
++
++	return ret;
++}
++
++u32 idmap_kpti_bbml3_flag;
++
++void __init init_idmap_kpti_bbml3_flag(void)
++{
++	WRITE_ONCE(idmap_kpti_bbml3_flag, 1);
++	/* Must be visible to other CPUs before stop_machine() is called. */
++	smp_mb();
++}
++
++static int __init linear_map_split_to_ptes(void *__unused)
++{
++	/*
++	 * Repainting the linear map must be done by CPU0 (the boot CPU) because
++	 * that's the only CPU that we know supports BBML3. The other CPUs will
++	 * be held in a waiting area with the idmap active.
++	 */
++	if (!smp_processor_id()) {
++		unsigned long lstart = _PAGE_OFFSET(vabits_actual);
++		unsigned long lend = PAGE_END;
++		unsigned long kstart = (unsigned long)lm_alias(_stext);
++		unsigned long kend = (unsigned long)lm_alias(__init_begin);
++		int ret;
++
++		/*
++		 * Wait for all secondary CPUs to be put into the waiting area.
++		 */
++		smp_cond_load_acquire(&idmap_kpti_bbml3_flag, VAL == num_online_cpus());
++
++		/*
++		 * Walk all of the linear map [lstart, lend), except the kernel
++		 * linear map alias [kstart, kend), and split all mappings to
++		 * PTE. The kernel alias remains static throughout runtime so
++		 * can continue to be safely mapped with large mappings.
++		 */
++		ret = range_split_to_ptes(lstart, kstart, GFP_ATOMIC);
++		if (!ret)
++			ret = range_split_to_ptes(kend, lend, GFP_ATOMIC);
++		if (ret)
++			panic("Failed to split linear map\n");
++		flush_tlb_kernel_range(lstart, lend);
++
++		/*
++		 * Relies on dsb in flush_tlb_kernel_range() to avoid reordering
++		 * before any page table split operations.
++		 */
++		WRITE_ONCE(idmap_kpti_bbml3_flag, 0);
++	} else {
++		typedef void (wait_split_fn)(void);
++		extern wait_split_fn wait_linear_map_split_to_ptes;
++		wait_split_fn *wait_fn;
++
++		wait_fn = (void *)__pa_symbol(wait_linear_map_split_to_ptes);
++
++		/*
++		 * At least one secondary CPU doesn't support BBML3 so cannot
++		 * tolerate the size of the live mappings changing. So have the
++		 * secondary CPUs wait for the boot CPU to make the changes
++		 * with the idmap active and init_mm inactive.
++		 */
++		cpu_install_idmap();
++		wait_fn();
++		cpu_uninstall_idmap();
++	}
++
++	return 0;
++}
++
++void __init linear_map_maybe_split_to_ptes(void)
++{
++	if (linear_map_requires_bbml3 && !cpus_have_cap(ARM64_HAS_BBML3)) {
++		init_idmap_kpti_bbml3_flag();
++		stop_machine(linear_map_split_to_ptes, NULL, cpu_online_mask);
++	}
++}
++
+ /*
+  * This function can only be used to modify existing table entries,
+  * without allocating new levels of table. Note that this permits the
+@@ -572,6 +1004,33 @@ static void __init arm64_kfence_map_pool(phys_addr_t kfence_pool, pgd_t *pgdp)
+ 	memblock_clear_nomap(kfence_pool, KFENCE_POOL_SIZE);
+ 	__kfence_pool = phys_to_virt(kfence_pool);
+ }
++
++bool arch_kfence_init_pool(void)
++{
++	unsigned long start = (unsigned long)__kfence_pool;
++	unsigned long end = start + KFENCE_POOL_SIZE;
++	int ret;
++
++	/* Exit early if we know the linear map is already pte-mapped. */
++	if (force_pte_mapping())
++		return true;
++
++	/* Kfence pool is already pte-mapped for the early init case. */
++	if (kfence_early_init)
++		return true;
++
++	mutex_lock(&pgtable_split_lock);
++	ret = range_split_to_ptes(start, end, GFP_PGTABLE_KERNEL);
++	mutex_unlock(&pgtable_split_lock);
++
++	/*
++	 * Since the system supports bbml3, tlb invalidation is not
++	 * required here; the pgtable mappings have been split to pte but larger
++	 * entries may safely linger in the TLB.
++	 */
++
++	return !ret;
++}
+ #else /* CONFIG_KFENCE */
+ 
+ static inline phys_addr_t arm64_kfence_alloc_pool(void) { return 0; }
+@@ -600,7 +1059,9 @@ static void __init map_mem(pgd_t *pgdp)
+ 
+ 	early_kfence_pool = arm64_kfence_alloc_pool();
+ 
+-	if (can_set_direct_map() || is_virtcca_cvm_world())
++	linear_map_requires_bbml3 = !force_pte_mapping() && can_set_direct_map();
++
++	if (force_pte_mapping() || is_virtcca_cvm_world())
+ 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+ 	else if (should_pmd_linear_mapping())
+ 		flags |= NO_PUD_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+@@ -792,13 +1253,14 @@ static void __init create_idmap(void)
+ 	__create_pgd_mapping(pgd, start, start, size, PAGE_KERNEL_ROX,
+ 			     early_pgtable_alloc, 0);
+ 
+-	if (IS_ENABLED(CONFIG_UNMAP_KERNEL_AT_EL0)) {
+-		extern u32 __idmap_kpti_flag;
+-		u64 pa = __pa_symbol(&__idmap_kpti_flag);
++	if (linear_map_requires_bbml3 || IS_ENABLED(CONFIG_UNMAP_KERNEL_AT_EL0)) {
++		u64 pa = __pa_symbol(&idmap_kpti_bbml3_flag);
+ 
+ 		/*
+ 		 * The KPTI G-to-nG conversion code needs a read-write mapping
+-		 * of its synchronization flag in the ID map.
++		 * of its synchronization flag in the ID map. This is also used
++		 * when splitting the linear map to ptes if a secondary CPU
++		 * doesn't support bbml3.
+ 		 */
+ 		__create_pgd_mapping(pgd, pa, pa, sizeof(u32), PAGE_KERNEL,
+ 				     early_pgtable_alloc, 0);
+@@ -1407,7 +1869,7 @@ int arch_add_memory(int nid, u64 start, u64 size,
+ 
+ 	VM_BUG_ON(!mhp_range_allowed(start, size, true));
+ 
+-	if (can_set_direct_map() || is_virtcca_cvm_world())
++	if (force_pte_mapping() || is_virtcca_cvm_world())
+ 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+ 	else if (should_pmd_linear_mapping() || numa_is_remote_node(nid))
+ 		flags |= NO_PUD_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
+diff --git a/arch/arm64/mm/pageattr.c b/arch/arm64/mm/pageattr.c
+index 7ca69627ae29..58e990915091 100644
+--- a/arch/arm64/mm/pageattr.c
++++ b/arch/arm64/mm/pageattr.c
+@@ -8,6 +8,7 @@
+ #include <linux/mem_encrypt.h>
+ #include <linux/sched.h>
+ #include <linux/vmalloc.h>
++#include <linux/pagewalk.h>
+ 
+ #include <asm/cacheflush.h>
+ #include <asm/pgtable-prot.h>
+@@ -20,6 +21,70 @@ struct page_change_data {
+ 	pgprot_t clear_mask;
+ };
+ 
++static u64 set_pageattr_masks(u64 val, struct mm_walk *walk)
++{
++	struct page_change_data *masks = walk->private;
++
++	/*
++	 * Some users clear and set bits which alias each other (e.g. PTE_NG and
++	 * PTE_PRESENT_INVALID). It is therefore important that we always clear
++	 * first then set.
++	 */
++	val &= ~(pgprot_val(masks->clear_mask));
++	val |= (pgprot_val(masks->set_mask));
++
++	return val;
++}
++
++static int pageattr_pud_entry(pud_t *pud, unsigned long addr,
++			      unsigned long next, struct mm_walk *walk)
++{
++	pud_t val = pudp_get(pud);
++
++	if (pud_leaf(val)) {
++		if (WARN_ON_ONCE((next - addr) != PUD_SIZE))
++			return -EINVAL;
++		val = __pud(set_pageattr_masks(pud_val(val), walk));
++		set_pud(pud, val);
++		walk->action = ACTION_CONTINUE;
++	}
++
++	return 0;
++}
++
++static int pageattr_pmd_entry(pmd_t *pmd, unsigned long addr,
++			      unsigned long next, struct mm_walk *walk)
++{
++	pmd_t val = pmdp_get(pmd);
++
++	if (pmd_leaf(val)) {
++		if (WARN_ON_ONCE((next - addr) != PMD_SIZE))
++			return -EINVAL;
++		val = __pmd(set_pageattr_masks(pmd_val(val), walk));
++		set_pmd(pmd, val);
++		walk->action = ACTION_CONTINUE;
++	}
++
++	return 0;
++}
++
++static int pageattr_pte_entry(pte_t *pte, unsigned long addr,
++			      unsigned long next, struct mm_walk *walk)
++{
++	pte_t val = __ptep_get(pte);
++
++	val = __pte(set_pageattr_masks(pte_val(val), walk));
++	__set_pte(pte, val);
++
++	return 0;
++}
++
++static const struct mm_walk_ops pageattr_ops = {
++	.pud_entry	= pageattr_pud_entry,
++	.pmd_entry	= pageattr_pmd_entry,
++	.pte_entry	= pageattr_pte_entry,
++};
++
+ bool rodata_full __ro_after_init = IS_ENABLED(CONFIG_RODATA_FULL_DEFAULT_ENABLED);
+ 
+ bool can_set_direct_map(void)
+@@ -37,39 +102,47 @@ bool can_set_direct_map(void)
+ 		arm64_kfence_can_set_direct_map() || is_realm_world();
+ }
+ 
+-static int change_page_range(pte_t *ptep, unsigned long addr, void *data)
++static int update_range_prot(unsigned long start, unsigned long size,
++			     pgprot_t set_mask, pgprot_t clear_mask)
+ {
+-	struct page_change_data *cdata = data;
+-	pte_t pte = __ptep_get(ptep);
++	struct page_change_data data;
++	int ret;
++
++	data.set_mask = set_mask;
++	data.clear_mask = clear_mask;
++
++	ret = split_kernel_leaf_mapping(start, start + size);
++	if (WARN_ON_ONCE(ret))
++		return ret;
+ 
+-	pte = clear_pte_bit(pte, cdata->clear_mask);
+-	pte = set_pte_bit(pte, cdata->set_mask);
++	arch_enter_lazy_mmu_mode();
+ 
+-	__set_pte(ptep, pte);
+-	return 0;
++	/*
++	 * The caller must ensure that the range we are operating on does not
++	 * partially overlap a block mapping, or a cont mapping. Any such case
++	 * must be eliminated by splitting the mapping.
++	 */
++	ret = walk_kernel_page_table_range_lockless(start, start + size,
++						    &pageattr_ops, NULL, &data);
++	arch_leave_lazy_mmu_mode();
++
++	return ret;
+ }
+ 
+-/*
+- * This function assumes that the range is mapped with PAGE_SIZE pages.
+- */
+ static int __change_memory_common(unsigned long start, unsigned long size,
+-				pgprot_t set_mask, pgprot_t clear_mask)
++				  pgprot_t set_mask, pgprot_t clear_mask)
+ {
+-	struct page_change_data data;
+ 	int ret;
+ 
+-	data.set_mask = set_mask;
+-	data.clear_mask = clear_mask;
+-
+-	ret = apply_to_page_range(&init_mm, start, size, change_page_range,
+-					&data);
++	ret = update_range_prot(start, size, set_mask, clear_mask);
+ 
+ 	/*
+-	 * If the memory is being made valid without changing any other bits
+-	 * then a TLBI isn't required as a non-valid entry cannot be cached in
+-	 * the TLB.
++	 * If the memory is being switched from present-invalid to valid without
++	 * changing any other bits then a TLBI isn't required as a non-valid
++	 * entry cannot be cached in the TLB.
+ 	 */
+-	if (pgprot_val(set_mask) != PTE_VALID || pgprot_val(clear_mask))
++	if (pgprot_val(set_mask) != PTE_PRESENT_VALID_KERNEL ||
++	    pgprot_val(clear_mask) != PTE_PRESENT_INVALID)
+ 		flush_tlb_kernel_range(start, start + size);
+ 	return ret;
+ }
+@@ -81,6 +154,7 @@ static int change_memory_common(unsigned long addr, int numpages,
+ 	unsigned long size = PAGE_SIZE * numpages;
+ 	unsigned long end = start + size;
+ 	struct vm_struct *area;
++	int ret;
+ 	int i;
+ 
+ 	if (!PAGE_ALIGNED(addr)) {
+@@ -118,8 +192,10 @@ static int change_memory_common(unsigned long addr, int numpages,
+ 	if (rodata_full && (pgprot_val(set_mask) == PTE_RDONLY ||
+ 			    pgprot_val(clear_mask) == PTE_RDONLY)) {
+ 		for (i = 0; i < area->nr_pages; i++) {
+-			__change_memory_common((u64)page_address(area->pages[i]),
++			ret = __change_memory_common((u64)page_address(area->pages[i]),
+ 					       PAGE_SIZE, set_mask, clear_mask);
++			if (ret)
++				return ret;
+ 		}
+ 	}
+ 
+@@ -164,42 +240,36 @@ int set_memory_valid(unsigned long addr, int numpages, int enable)
+ {
+ 	if (enable)
+ 		return __change_memory_common(addr, PAGE_SIZE * numpages,
+-					__pgprot(PTE_VALID),
+-					__pgprot(0));
++					__pgprot(PTE_PRESENT_VALID_KERNEL),
++					__pgprot(PTE_PRESENT_INVALID));
+ 	else
+ 		return __change_memory_common(addr, PAGE_SIZE * numpages,
+-					__pgprot(0),
+-					__pgprot(PTE_VALID));
++					__pgprot(PTE_PRESENT_INVALID),
++					__pgprot(PTE_PRESENT_VALID_KERNEL));
+ }
+ 
+ int set_direct_map_invalid_noflush(struct page *page)
+ {
+-	struct page_change_data data = {
+-		.set_mask = __pgprot(0),
+-		.clear_mask = __pgprot(PTE_VALID),
+-	};
++	pgprot_t clear_mask = __pgprot(PTE_PRESENT_VALID_KERNEL);
++	pgprot_t set_mask = __pgprot(PTE_PRESENT_INVALID);
+ 
+ 	if (!can_set_direct_map())
+ 		return 0;
+ 
+-	return apply_to_page_range(&init_mm,
+-				   (unsigned long)page_address(page),
+-				   PAGE_SIZE, change_page_range, &data);
++	return update_range_prot((unsigned long)page_address(page),
++				 PAGE_SIZE, set_mask, clear_mask);
+ }
+ 
+ int set_direct_map_default_noflush(struct page *page)
+ {
+-	struct page_change_data data = {
+-		.set_mask = __pgprot(PTE_VALID | PTE_WRITE),
+-		.clear_mask = __pgprot(PTE_RDONLY),
+-	};
++	pgprot_t set_mask = __pgprot(PTE_PRESENT_VALID_KERNEL | PTE_WRITE);
++	pgprot_t clear_mask = __pgprot(PTE_PRESENT_INVALID | PTE_RDONLY);
+ 
+ 	if (!can_set_direct_map())
+ 		return 0;
+ 
+-	return apply_to_page_range(&init_mm,
+-				   (unsigned long)page_address(page),
+-				   PAGE_SIZE, change_page_range, &data);
++	return update_range_prot((unsigned long)page_address(page),
++				 PAGE_SIZE, set_mask, clear_mask);
+ }
+ 
+ static int __set_memory_enc_dec(unsigned long addr,
+@@ -229,8 +299,8 @@ static int __set_memory_enc_dec(unsigned long addr,
+ 	 * entries or Synchronous External Aborts caused by RIPAS_EMPTY
+ 	 */
+ 	ret = __change_memory_common(addr, PAGE_SIZE * numpages,
+-				     __pgprot(set_prot),
+-				     __pgprot(clear_prot | PTE_VALID));
++				     __pgprot(set_prot | PTE_PRESENT_INVALID),
++				     __pgprot(clear_prot | PTE_PRESENT_VALID_KERNEL));
+ 
+ 	if (ret)
+ 		return ret;
+@@ -244,8 +314,8 @@ static int __set_memory_enc_dec(unsigned long addr,
+ 		return ret;
+ 
+ 	return __change_memory_common(addr, PAGE_SIZE * numpages,
+-				      __pgprot(PTE_VALID),
+-				      __pgprot(0));
++				      __pgprot(PTE_PRESENT_VALID_KERNEL),
++				      __pgprot(PTE_PRESENT_INVALID));
+ }
+ 
+ static int realm_set_memory_encrypted(unsigned long addr, int numpages)
+@@ -324,15 +394,15 @@ bool kernel_page_present(struct page *page)
+ 	pud = READ_ONCE(*pudp);
+ 	if (pud_none(pud))
+ 		return false;
+-	if (pud_sect(pud))
+-		return true;
++	if (pud_leaf(pud))
++		return pud_valid(pud);
+ 
+ 	pmdp = pmd_offset(pudp, addr);
+ 	pmd = READ_ONCE(*pmdp);
+ 	if (pmd_none(pmd))
+ 		return false;
+-	if (pmd_sect(pmd))
+-		return true;
++	if (pmd_leaf(pmd))
++		return pmd_valid(pmd);
+ 
+ 	ptep = pte_offset_kernel(pmdp, addr);
+ 	return pte_valid(__ptep_get(ptep));
+diff --git a/arch/arm64/mm/pfn_range_alloc.c b/arch/arm64/mm/pfn_range_alloc.c
+index 3a4e4b4991c6..43a77f38e006 100644
+--- a/arch/arm64/mm/pfn_range_alloc.c
++++ b/arch/arm64/mm/pfn_range_alloc.c
+@@ -510,7 +510,7 @@ int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
+ 	start = (unsigned long)page_to_virt(pfn_to_page(start_pfn));
+ 	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+ 	mmap_write_lock(&init_mm);
+-	walk_page_range_novma(&init_mm, start, end,
++	walk_kernel_page_table_range(start, end,
+ 				&invalid_ops, NULL, (void *)set_invalid);
+ 	mmap_write_unlock(&init_mm);
+ 	if (set_invalid)
+@@ -593,10 +593,10 @@ int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool s
+ 		return ret;
+ 
+ 	mmap_write_lock(&init_mm);
+-	walk_page_range_novma(&init_mm, start, end,
++	walk_kernel_page_table_range(start, end,
+ 				&invalid_ops, NULL, (void *)true);
+ 	flush_tlb_kernel_range(start, end);
+-	walk_page_range_novma(&init_mm, start, end,
++	walk_kernel_page_table_range(start, end,
+ 				&nc_ops, NULL, (void *)set_nc);
+ 	mmap_write_unlock(&init_mm);
+ 
+diff --git a/arch/arm64/mm/proc.S b/arch/arm64/mm/proc.S
+index 9ef7b07349d7..8582a53f8419 100644
+--- a/arch/arm64/mm/proc.S
++++ b/arch/arm64/mm/proc.S
+@@ -246,10 +246,6 @@ SYM_FUNC_END(idmap_cpu_replace_ttbr1)
+  *
+  * Called exactly once from stop_machine context by each CPU found during boot.
+  */
+-	.pushsection	".data", "aw", %progbits
+-SYM_DATA(__idmap_kpti_flag, .long 1)
+-	.popsection
+-
+ SYM_TYPED_FUNC_START(idmap_kpti_install_ng_mappings)
+ 	cpu		.req	w0
+ 	temp_pte	.req	x0
+@@ -272,7 +268,7 @@ SYM_TYPED_FUNC_START(idmap_kpti_install_ng_mappings)
+ 
+ 	mov	x5, x3				// preserve temp_pte arg
+ 	mrs	swapper_ttb, ttbr1_el1
+-	adr_l	flag_ptr, __idmap_kpti_flag
++	adr_l	flag_ptr, idmap_kpti_bbml3_flag
+ 
+ 	cbnz	cpu, __idmap_kpti_secondary
+ 
+@@ -366,7 +362,25 @@ SYM_TYPED_FUNC_START(idmap_kpti_install_ng_mappings)
+ __idmap_kpti_secondary:
+ 	/* Uninstall swapper before surgery begins */
+ 	__idmap_cpu_set_reserved_ttbr1 x16, x17
++	b scondary_cpu_wait
++
++	.unreq	swapper_ttb
++	.unreq	flag_ptr
++SYM_FUNC_END(idmap_kpti_install_ng_mappings)
++	.popsection
++#endif
++
++	.pushsection ".idmap.text", "a"
++SYM_TYPED_FUNC_START(wait_linear_map_split_to_ptes)
++	/* Must be same registers as in idmap_kpti_install_ng_mappings */
++	swapper_ttb	.req	x3
++	flag_ptr	.req	x4
++
++	mrs     swapper_ttb, ttbr1_el1
++	adr_l   flag_ptr, idmap_kpti_bbml3_flag
++	__idmap_cpu_set_reserved_ttbr1 x16, x17
+ 
++scondary_cpu_wait:
+ 	/* Increment the flag to let the boot CPU we're ready */
+ 1:	ldxr	w16, [flag_ptr]
+ 	add	w16, w16, #1
+@@ -386,9 +400,8 @@ __idmap_kpti_secondary:
+ 
+ 	.unreq	swapper_ttb
+ 	.unreq	flag_ptr
+-SYM_FUNC_END(idmap_kpti_install_ng_mappings)
++SYM_FUNC_END(wait_linear_map_split_to_ptes)
+ 	.popsection
+-#endif
+ 
+ /*
+  *	__cpu_setup
+diff --git a/arch/arm64/mm/trans_pgd.c b/arch/arm64/mm/trans_pgd.c
+index 5139a28130c0..b09a1909429b 100644
+--- a/arch/arm64/mm/trans_pgd.c
++++ b/arch/arm64/mm/trans_pgd.c
+@@ -31,34 +31,6 @@ static void *trans_alloc(struct trans_pgd_info *info)
+ 	return info->trans_alloc_page(info->trans_alloc_arg);
+ }
+ 
+-static void _copy_pte(pte_t *dst_ptep, pte_t *src_ptep, unsigned long addr)
+-{
+-	pte_t pte = __ptep_get(src_ptep);
+-
+-	if (pte_valid(pte)) {
+-		/*
+-		 * Resume will overwrite areas that may be marked
+-		 * read only (code, rodata). Clear the RDONLY bit from
+-		 * the temporary mappings we use during restore.
+-		 */
+-		__set_pte(dst_ptep, pte_mkwrite_novma(pte));
+-	} else if ((debug_pagealloc_enabled() ||
+-		   is_kfence_address((void *)addr)) && !pte_none(pte)) {
+-		/*
+-		 * debug_pagealloc will removed the PTE_VALID bit if
+-		 * the page isn't in use by the resume kernel. It may have
+-		 * been in use by the original kernel, in which case we need
+-		 * to put it back in our copy to do the restore.
+-		 *
+-		 * Before marking this entry valid, check the pfn should
+-		 * be mapped.
+-		 */
+-		BUG_ON(!pfn_valid(pte_pfn(pte)));
+-
+-		__set_pte(dst_ptep, pte_mkpresent(pte_mkwrite_novma(pte)));
+-	}
+-}
+-
+ static int copy_pte(struct trans_pgd_info *info, pmd_t *dst_pmdp,
+ 		    pmd_t *src_pmdp, unsigned long start, unsigned long end)
+ {
+@@ -74,7 +46,11 @@ static int copy_pte(struct trans_pgd_info *info, pmd_t *dst_pmdp,
+ 
+ 	src_ptep = pte_offset_kernel(src_pmdp, start);
+ 	do {
+-		_copy_pte(dst_ptep, src_ptep, addr);
++		pte_t pte = __ptep_get(src_ptep);
++
++		if (pte_none(pte))
++			continue;
++		__set_pte(dst_ptep, pte_mkvalid_k(pte_mkwrite_novma(pte)));
+ 	} while (dst_ptep++, src_ptep++, addr += PAGE_SIZE, addr != end);
+ 
+ 	return 0;
+@@ -107,8 +83,7 @@ static int copy_pmd(struct trans_pgd_info *info, pud_t *dst_pudp,
+ 			if (copy_pte(info, dst_pmdp, src_pmdp, addr, next))
+ 				return -ENOMEM;
+ 		} else {
+-			set_pmd(dst_pmdp,
+-				__pmd(pmd_val(pmd) & ~PMD_SECT_RDONLY));
++			set_pmd(dst_pmdp, pmd_mkvalid_k(pmd_mkwrite_novma(pmd)));
+ 		}
+ 	} while (dst_pmdp++, src_pmdp++, addr = next, addr != end);
+ 
+@@ -143,8 +118,7 @@ static int copy_pud(struct trans_pgd_info *info, p4d_t *dst_p4dp,
+ 			if (copy_pmd(info, dst_pudp, src_pudp, addr, next))
+ 				return -ENOMEM;
+ 		} else {
+-			set_pud(dst_pudp,
+-				__pud(pud_val(pud) & ~PUD_SECT_RDONLY));
++			set_pud(dst_pudp, pud_mkvalid_k(pud_mkwrite_novma(pud)));
+ 		}
+ 	} while (dst_pudp++, src_pudp++, addr = next, addr != end);
+ 
+diff --git a/arch/arm64/tools/cpucaps b/arch/arm64/tools/cpucaps
+index 82ce2389f7a2..8b5b9944884c 100644
+--- a/arch/arm64/tools/cpucaps
++++ b/arch/arm64/tools/cpucaps
+@@ -118,7 +118,7 @@ WORKAROUND_PHYTIUM_FT3386
+ HAS_COPY_OPT
+ HAS_LSUI
+ HAS_FPMR
+-KABI_RESERVE_11
++HAS_BBML3
+ KABI_RESERVE_12
+ KABI_RESERVE_13
+ KABI_RESERVE_14
+diff --git a/arch/arm64/tools/sysreg b/arch/arm64/tools/sysreg
+index 603456d5e469..68f756a2e39d 100644
+--- a/arch/arm64/tools/sysreg
++++ b/arch/arm64/tools/sysreg
+@@ -2163,6 +2163,7 @@ UnsignedEnum	55:52	BBM
+ 	0b0000	0
+ 	0b0001	1
+ 	0b0010	2
++	0b0011	3
+ EndEnum
+ UnsignedEnum	51:48	TTL
+ 	0b0000	NI
+diff --git a/arch/openrisc/kernel/dma.c b/arch/openrisc/kernel/dma.c
+index b3edbb33b621..0b4c20cc76cb 100644
+--- a/arch/openrisc/kernel/dma.c
++++ b/arch/openrisc/kernel/dma.c
+@@ -75,7 +75,7 @@ void *arch_dma_set_uncached(void *cpu_addr, size_t size)
+ 	 * them and setting the cache-inhibit bit.
+ 	 */
+ 	mmap_write_lock(&init_mm);
+-	error = walk_page_range_novma(&init_mm, va, va + size,
++	error = walk_kernel_page_table_range(va, va + size,
+ 			&set_nocache_walk_ops, NULL, NULL);
+ 	mmap_write_unlock(&init_mm);
+ 
+@@ -90,7 +90,7 @@ void arch_dma_clear_uncached(void *cpu_addr, size_t size)
+ 
+ 	mmap_write_lock(&init_mm);
+ 	/* walk_page_range shouldn't be able to fail here */
+-	WARN_ON(walk_page_range_novma(&init_mm, va, va + size,
++	WARN_ON(walk_kernel_page_table_range(va, va + size,
+ 			&clear_nocache_walk_ops, NULL, NULL));
+ 	mmap_write_unlock(&init_mm);
+ }
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 271d01a5ba4d..a35edf662d7e 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -299,7 +299,7 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
+ 			if (ret)
+ 				goto unlock;
+ 
+-			ret = walk_page_range_novma(&init_mm, lm_start, lm_end,
++			ret = walk_kernel_page_table_range(lm_start, lm_end,
+ 						    &pageattr_ops, NULL, &masks);
+ 			if (ret)
+ 				goto unlock;
+@@ -317,13 +317,13 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
+ 		if (ret)
+ 			goto unlock;
+ 
+-		ret = walk_page_range_novma(&init_mm, lm_start, lm_end,
++		ret = walk_kernel_page_table_range(lm_start, lm_end,
+ 					    &pageattr_ops, NULL, &masks);
+ 		if (ret)
+ 			goto unlock;
+ 	}
+ 
+-	ret =  walk_page_range_novma(&init_mm, start, end, &pageattr_ops, NULL,
++	ret =  walk_kernel_page_table_range(start, end, &pageattr_ops, NULL,
+ 				     &masks);
+ 
+ unlock:
+@@ -335,7 +335,7 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
+ 	 */
+ 	flush_tlb_all();
+ #else
+-	ret =  walk_page_range_novma(&init_mm, start, end, &pageattr_ops, NULL,
++	ret =  walk_kernel_page_table_range(start, end, &pageattr_ops, NULL,
+ 				     &masks);
+ 
+ 	mmap_write_unlock(&init_mm);
+diff --git a/arch/sw_64/mm/pageattr.c b/arch/sw_64/mm/pageattr.c
+index 0d55065fbe54..34218eb3ad45 100644
+--- a/arch/sw_64/mm/pageattr.c
++++ b/arch/sw_64/mm/pageattr.c
+@@ -82,7 +82,7 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
+ 		return 0;
+ 
+ 	mmap_write_lock(&init_mm);
+-	ret = walk_page_range_novma(&init_mm, start, end, &pageattr_ops, NULL,
++	ret = walk_kernel_page_table_range(start, end, &pageattr_ops, NULL,
+ 				    &masks);
+ 	mmap_write_unlock(&init_mm);
+ 
+diff --git a/include/linux/pagewalk.h b/include/linux/pagewalk.h
+index 7684555551ce..57101d8b2d1d 100644
+--- a/include/linux/pagewalk.h
++++ b/include/linux/pagewalk.h
+@@ -119,10 +119,12 @@ struct mm_walk {
+ int walk_page_range(struct mm_struct *mm, unsigned long start,
+ 		unsigned long end, const struct mm_walk_ops *ops,
+ 		void *private);
+-int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
+-			  unsigned long end, const struct mm_walk_ops *ops,
+-			  pgd_t *pgd,
+-			  void *private);
++int walk_kernel_page_table_range(unsigned long start,
++		unsigned long end, const struct mm_walk_ops *ops,
++		pgd_t *pgd, void *private);
++int walk_kernel_page_table_range_lockless(unsigned long start,
++		unsigned long end, const struct mm_walk_ops *ops,
++		pgd_t *pgd, void *private);
+ int walk_page_range_vma(struct vm_area_struct *vma, unsigned long start,
+ 			unsigned long end, const struct mm_walk_ops *ops,
+ 			void *private);
+diff --git a/mm/internal.h b/mm/internal.h
+index c5e8982490d4..6843e7936ebf 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -10,6 +10,7 @@
+ #include <linux/fs.h>
+ #include <linux/mm.h>
+ #include <linux/pagemap.h>
++#include <linux/pagewalk.h>
+ #include <linux/rmap.h>
+ #include <linux/swap.h>
+ #include <linux/swapops.h>
+@@ -1603,4 +1604,8 @@ static inline struct folio *folio_alloc_cma_mpol(gfp_t gfp, unsigned int order,
+ static inline void folio_put_cma_fallback(struct folio *folio) {}
+ #endif /* CONFIG_CMA_FOLIO */
+ 
++int walk_page_range_debug(struct mm_struct *mm, unsigned long start,
++			  unsigned long end, const struct mm_walk_ops *ops,
++			  pgd_t *pgd, void *private);
++
+ #endif	/* __MM_INTERNAL_H */
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index 0ee2ff6eac2b..c0d7302c7c75 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -533,8 +533,7 @@ int walk_page_range(struct mm_struct *mm, unsigned long start,
+ EXPORT_SYMBOL_GPL(walk_page_range);
+ 
+ /**
+- * walk_page_range_novma - walk a range of pagetables not backed by a vma
+- * @mm:		mm_struct representing the target process of page table walk
++ * walk_kernel_page_table_range - walk a range of kernel pagetables.
+  * @start:	start address of the virtual address range
+  * @end:	end address of the virtual address range
+  * @ops:	operation to call during the walk
+@@ -544,12 +543,71 @@ EXPORT_SYMBOL_GPL(walk_page_range);
+  * Similar to walk_page_range() but can walk any page tables even if they are
+  * not backed by VMAs. Because 'unusual' entries may be walked this function
+  * will also not lock the PTEs for the pte_entry() callback. This is useful for
+- * walking the kernel pages tables or page tables for firmware.
++ * walking kernel pages tables or page tables for firmware.
++ *
++ * Note: Be careful to walk the kernel pages tables, the caller may be need to
++ * take other effective approache (mmap lock may be insufficient) to prevent
++ * the intermediate kernel page tables belonging to the specified address range
++ * from being freed (e.g. memory hot-remove).
++ */
++int walk_kernel_page_table_range(unsigned long start, unsigned long end,
++		const struct mm_walk_ops *ops, pgd_t *pgd, void *private)
++{
++	/*
++	 * Kernel intermediate page tables are usually not freed, so the mmap
++	 * read lock is sufficient. But there are some exceptions.
++	 * E.g. memory hot-remove. In which case, the mmap lock is insufficient
++	 * to prevent the intermediate kernel pages tables belonging to the
++	 * specified address range from being freed. The caller should take
++	 * other actions to prevent this race.
++	 */
++	mmap_assert_locked(&init_mm);
++
++	return walk_kernel_page_table_range_lockless(start, end, ops, pgd,
++						     private);
++}
++
++/*
++ * Use this function to walk the kernel page tables locklessly. It should be
++ * guaranteed that the caller has exclusive access over the range they are
++ * operating on - that there should be no concurrent access, for example,
++ * changing permissions for vmalloc objects.
++ */
++int walk_kernel_page_table_range_lockless(unsigned long start, unsigned long end,
++		const struct mm_walk_ops *ops, pgd_t *pgd, void *private)
++{
++	struct mm_walk walk = {
++		.ops		= ops,
++		.mm		= &init_mm,
++		.pgd		= pgd,
++		.private	= private,
++		.no_vma		= true
++	};
++
++	if (start >= end)
++		return -EINVAL;
++
++	return walk_pgd_range(start, end, &walk);
++}
++
++/**
++ * walk_page_range_debug - walk a range of pagetables not backed by a vma
++ * @mm:		mm_struct representing the target process of page table walk
++ * @start:	start address of the virtual address range
++ * @end:	end address of the virtual address range
++ * @ops:	operation to call during the walk
++ * @pgd:	pgd to walk if different from mm->pgd
++ * @private:	private data for callbacks' usage
++ *
++ * Similar to walk_page_range() but can walk any page tables even if they are
++ * not backed by VMAs. Because 'unusual' entries may be walked this function
++ * will also not lock the PTEs for the pte_entry() callback.
++ *
++ * This is for debugging purposes ONLY.
+  */
+-int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
++int walk_page_range_debug(struct mm_struct *mm, unsigned long start,
+ 			  unsigned long end, const struct mm_walk_ops *ops,
+-			  pgd_t *pgd,
+-			  void *private)
++			  pgd_t *pgd, void *private)
+ {
+ 	struct mm_walk walk = {
+ 		.ops		= ops,
+@@ -559,9 +617,21 @@ int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
+ 		.no_vma		= true
+ 	};
+ 
++	/* For convenience, we allow traversal of kernel mappings. */
++	if (mm == &init_mm)
++		return walk_kernel_page_table_range(start, end, ops,
++						    pgd, private);
+ 	if (start >= end || !walk.mm)
+ 		return -EINVAL;
+ 
++	/*
++	 * The mmap lock protects the page walker from changes to the page
++	 * tables during the walk.  However a read lock is insufficient to
++	 * protect those areas which don't have a VMA as munmap() detaches
++	 * the VMAs before downgrading to a read lock and actually tearing
++	 * down PTEs/page tables. In which case, the mmap write lock should
++	 * be held.
++	 */
+ 	mmap_assert_write_locked(walk.mm);
+ 
+ 	return walk_pgd_range(start, end, &walk);
+diff --git a/mm/ptdump.c b/mm/ptdump.c
+index e46df2c24d85..616a54c0cc42 100644
+--- a/mm/ptdump.c
++++ b/mm/ptdump.c
+@@ -3,6 +3,7 @@
+ #include <linux/pagewalk.h>
+ #include <linux/ptdump.h>
+ #include <linux/kasan.h>
++#include "internal.h"
+ 
+ #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
+ /*
+@@ -155,7 +156,7 @@ void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm, pgd_t *pgd)
+ 	get_online_mems();
+ 	mmap_write_lock(mm);
+ 	while (range->start != range->end) {
+-		walk_page_range_novma(mm, range->start, range->end,
++		walk_page_range_debug(mm, range->start, range->end,
+ 				      &ptdump_ops, pgd, st);
+ 		range++;
+ 	}

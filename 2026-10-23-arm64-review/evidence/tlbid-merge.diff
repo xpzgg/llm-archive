@@ -1,0 +1,1711 @@
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 736908afc98a..50146c8f8617 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2303,6 +2303,35 @@ config ARM64_TLB_RANGE
+ 	  The feature introduces new assembly instructions, and they were
+ 	  support when binutils >= 2.30.
+ 
++config ARM64_TLBID
++	bool "Enable support for TLBID (TLBI Domains)"
++	default y
++	depends on AS_HAS_TLBIP
++	help
++	  TLBI broadcasting all PEs introduces performance noise. By
++	  combining hardware and software, TLBID (TLBI Domain) limit TLBI
++	  to an appropriate scope, avoiding the performance overhead caused
++	  by broadcasting.
++
++	  Arm Architecture defines the FEAT_TLBID extension since Armv9.3,
++	  when present, allows the OSPM to target TLB invalidations to
++	  a specific domain. A TLBI domain can be contained in multiple
++	  parent domains.
++
++	  The TLBI table lists all the PE and SMMU components and the TLBI
++	  Domains that each component belongs to.
++
++	  The feature is detected at runtime, and will remain disabled
++	  if the system does not implement the feature.
++
++config AS_HAS_TLBIP
++	def_bool $(as-instr,.arch_extension d128)
++	help
++	  The TLBIP instruction mnemonic requires the FEAT_D128 extension
++	  of the assembler. When the assembler does not support it, the
++	  kernel falls back to emitting TLBIP instructions as raw
++	  encodings.
++
+ config ARM64_MPAM
+ 	bool "Enable support for MPAM"
+ 	select ACPI_MPAM if ACPI
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index aeaaabdb8f68..edf2ed90efb8 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -574,6 +574,7 @@ CONFIG_ARM64_PTR_AUTH_KERNEL=y
+ #
+ CONFIG_ARM64_AMU_EXTN=y
+ CONFIG_ARM64_TLB_RANGE=y
++CONFIG_ARM64_TLBID=y
+ CONFIG_ARM64_MPAM=y
+ # end of ARMv8.4 architectural features
+ 
+diff --git a/arch/arm64/include/asm/cpu.h b/arch/arm64/include/asm/cpu.h
+index 40113c406d7d..ede40c40d410 100644
+--- a/arch/arm64/include/asm/cpu.h
++++ b/arch/arm64/include/asm/cpu.h
+@@ -47,6 +47,7 @@ struct cpuinfo_arm64 {
+ 	u64		reg_gmid;
+ 	u64		reg_smidr;
+ 	u64		reg_mpamidr;
++	u64		reg_tlbididr;
+ 
+ 	u64		reg_id_aa64dfr0;
+ 	u64		reg_id_aa64dfr1;
+@@ -58,6 +59,7 @@ struct cpuinfo_arm64 {
+ 	u64		reg_id_aa64mmfr1;
+ 	u64		reg_id_aa64mmfr2;
+ 	u64		reg_id_aa64mmfr3;
++	u64		reg_id_aa64mmfr4;
+ 	u64		reg_id_aa64pfr0;
+ 	u64		reg_id_aa64pfr1;
+ 	u64		reg_id_aa64pfr2;
+diff --git a/arch/arm64/include/asm/cpufeature.h b/arch/arm64/include/asm/cpufeature.h
+index 234533debc05..7a0c8981120b 100644
+--- a/arch/arm64/include/asm/cpufeature.h
++++ b/arch/arm64/include/asm/cpufeature.h
+@@ -666,6 +666,13 @@ static inline bool id_aa64pfr1_mte(u64 pfr1)
+ 	return val >= ID_AA64PFR1_EL1_MTE_MTE2;
+ }
+ 
++static inline bool id_aa64mmfr4_tlbid(u64 mmfr4)
++{
++	u32 val = cpuid_feature_extract_unsigned_field(mmfr4, ID_AA64MMFR4_EL1_TLBID_SHIFT);
++
++	return val > 0;
++}
++
+ void __init setup_cpu_features(void);
+ void check_local_cpu_capabilities(void);
+ 
+@@ -922,6 +929,18 @@ static inline bool system_supports_tlb_range(void)
+ 		cpus_have_const_cap(ARM64_HAS_TLB_RANGE);
+ }
+ 
++static inline bool system_supports_sysinstr128(void)
++{
++	return cpus_have_const_cap(ARM64_HAS_SYSINSTR128);
++}
++
++static inline bool system_supports_tlbid(void)
++{
++	return IS_ENABLED(CONFIG_ARM64_TLBID) &&
++		system_supports_sysinstr128() &&
++		cpus_have_const_cap(ARM64_HAS_TLBID);
++}
++
+ static inline bool cpus_support_mpam(void)
+ {
+ 	return IS_ENABLED(CONFIG_ARM64_MPAM) &&
+diff --git a/arch/arm64/include/asm/tlbflush.h b/arch/arm64/include/asm/tlbflush.h
+index c082cace5683..5ccc0982f834 100644
+--- a/arch/arm64/include/asm/tlbflush.h
++++ b/arch/arm64/include/asm/tlbflush.h
+@@ -16,6 +16,7 @@
+ #include <linux/mmu_notifier.h>
+ #include <asm/cputype.h>
+ #include <asm/mmu.h>
++#include <asm/tlbid.h>
+ 
+ /*
+  * Raw TLBI operations.
+@@ -165,6 +166,61 @@ static inline unsigned long get_trans_granule(void)
+ 		(__pages >> (5 * (scale) + 1)) - 1;			\
+ 	})
+ 
++enum tlb_flush_scope {
++	TLB_FLUSH_SCOPE_LOCAL,
++	TLB_FLUSH_SCOPE_DOMAIN,
++	TLB_FLUSH_SCOPE_BROADCAST,
++};
++
++/* This macro creates a properly formatted VA operand for the TLBID */
++#define __TLBI_DOMAIN(asid, domain)				\
++	({							\
++		unsigned long __ta = 0;				\
++		__ta |= FIELD_PREP(GENMASK_ULL(15, 0), domain);	\
++		__ta |= FIELD_PREP(GENMASK_ULL(63, 48), asid);	\
++		__ta;						\
++	})
++
++/*
++ * Determines whether the user tlbi invalidation can be performed only on the
++ * local CPU or whether it needs to be multicast or broadcast.
++ */
++static inline enum tlb_flush_scope flush_tlb_begin(struct mm_struct *mm,
++						   unsigned long *flags)
++{
++	if (!system_supports_tlbid()) {
++		dsb(ishst);
++		return TLB_FLUSH_SCOPE_BROADCAST;
++	}
++
++	local_irq_save(*flags);
++
++	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) >= nr_cpu_ids) {
++		dsb(nshst);
++		return TLB_FLUSH_SCOPE_LOCAL;
++	} else {
++		dsb(ishst);
++		return TLB_FLUSH_SCOPE_DOMAIN;
++	}
++}
++
++static inline void flush_tlb_end(enum tlb_flush_scope scope, unsigned long flags)
++{
++	switch (scope) {
++	case TLB_FLUSH_SCOPE_LOCAL:
++		dsb(nsh);
++		local_irq_restore(flags);
++		break;
++	case TLB_FLUSH_SCOPE_DOMAIN:
++		dsb(ish);
++		local_irq_restore(flags);
++		break;
++	case TLB_FLUSH_SCOPE_BROADCAST:
++		dsb(ish);
++		break;
++	}
++}
++
+ /*
+  *	TLB Invalidation
+  *	================
+@@ -252,42 +308,29 @@ static inline void flush_tlb_all(void)
+ 
+ static inline void flush_tlb_mm(struct mm_struct *mm)
+ {
+-	unsigned long asid;
+-
+-	dsb(ishst);
+-	asid = __TLBI_VADDR(0, ASID(mm));
+-	__tlbi(aside1is, asid);
+-	__tlbi_user(aside1is, asid);
+-	dsb(ish);
++	enum tlb_flush_scope scope;
++	unsigned long asid, flags;
++	int domain;
++
++	scope = flush_tlb_begin(mm, &flags);
++	if (scope == TLB_FLUSH_SCOPE_LOCAL) {
++		asid = __TLBI_VADDR(0, ASID(mm));
++		__tlbi(aside1, asid);
++		__tlbi_user(aside1, asid);
++	} else if (scope == TLB_FLUSH_SCOPE_BROADCAST) {
++		asid = __TLBI_VADDR(0, ASID(mm));
++		__tlbi(aside1is, asid);
++		__tlbi_user(aside1is, asid);
++	} else {
++		domain = pick_best_domain(mm_cpumask(mm));
++		asid = __TLBI_DOMAIN(ASID(mm), domain);
++		__tlbi(aside1is, asid);
++		__tlbi_user(aside1is, asid);
++	}
++	flush_tlb_end(scope, flags);
+ 	mmu_notifier_arch_invalidate_secondary_tlbs(mm, 0, -1UL);
+ }
+ 
+-static inline void __flush_tlb_page_nosync(struct mm_struct *mm,
+-					   unsigned long uaddr)
+-{
+-	unsigned long addr;
+-
+-	dsb(ishst);
+-	addr = __TLBI_VADDR(uaddr, ASID(mm));
+-	__tlbi(vale1is, addr);
+-	__tlbi_user(vale1is, addr);
+-	mmu_notifier_arch_invalidate_secondary_tlbs(mm, uaddr & PAGE_MASK,
+-						(uaddr & PAGE_MASK) + PAGE_SIZE);
+-}
+-
+-static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
+-					 unsigned long uaddr)
+-{
+-	return __flush_tlb_page_nosync(vma->vm_mm, uaddr);
+-}
+-
+-static inline void flush_tlb_page(struct vm_area_struct *vma,
+-				  unsigned long uaddr)
+-{
+-	flush_tlb_page_nosync(vma, uaddr);
+-	dsb(ish);
+-}
+-
+ static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
+ {
+ #ifdef CONFIG_ARM64_WORKAROUND_REPEAT_TLBI
+@@ -398,6 +441,150 @@ do {									\
+ #define __flush_s2_tlb_range_op(op, start, pages, stride, tlb_level) \
+ 	__flush_tlb_range_op(op, start, pages, stride, 0, tlb_level, false)
+ 
++/*
++ * TLBIP is the 128-bit form of TLBI (an alias of the SYSP system
++ * instruction, FEAT_SYSINSTR128) and takes a pair of consecutive,
++ * even-aligned registers (Xt, Xt+1), of which only Xt is encoded in the
++ * instruction. With FEAT_TLBID the invalidation is restricted to the PEs
++ * that are within both the broadcast shareability domain and the TLBI
++ * Domain held in bits [15:0] of Xt. This allows a range invalidation to
++ * be multicast to the CPUs of a single domain instead of being broadcast
++ * to every CPU in the system.
++ *
++ * The operand pair of the *E1IS range instructions is laid out as:
++ *
++ *	Xt  : [63:48] ASID, [47:46] TG, [45:44] SCALE, [43:39] NUM,
++ *	      [38:37] TTL, [32] TTL64, [15:0] TLBID
++ *	Xt+1: [43:0] BaseADDR[55:12]
++ *
++ * and for the non-range VAE1IS/VALE1IS instructions as:
++ *
++ *	Xt  : [63:48] ASID, [47:44] TTL, [32] TTL64, [15:0] TLBID
++ *	Xt+1: [43:0] VA[55:12]
++ *
++ * TTL64 is always set so that the TTL hint applies to the VMSAv8-64 TLB
++ * entries, which are the only ones the kernel creates. When the assembler
++ * does not support the TLBIP mnemonic (CONFIG_AS_HAS_TLBIP), the
++ * instructions are emitted as raw encodings instead.
++ */
++#define __TLBI_PAIR_LO	"x10"
++#define __TLBI_PAIR_HI	"x11"
++
++#define __TLBIP_PREAMBLE	".arch_extension d128\n"
++#define __tlbip(op, lo, hi)							\
++do {										\
++	register unsigned long __tlbip_lo asm (__TLBI_PAIR_LO) = (lo);		\
++	register unsigned long __tlbip_hi asm (__TLBI_PAIR_HI) = (hi);		\
++										\
++	asm volatile(__TLBIP_PREAMBLE						\
++		     "tlbip " #op ", " __TLBI_PAIR_LO ", " __TLBI_PAIR_HI "\n\t" \
++		     : : "r" (__tlbip_lo), "r" (__tlbip_hi));			\
++} while (0)
++
++#define __tlbip_user(insn, lo, hi)				\
++do {								\
++	if (arm64_kernel_unmapped_at_el0())			\
++		__tlbip(insn, (lo) | USER_ASID_FLAG, hi);	\
++} while (0)
++
++/* Build the lower register of a TLBIP operand pair carrying @asid. */
++static __always_inline unsigned long
++__tlbip_range_lo(unsigned long asid, unsigned long domain,
++		 int scale, int num, int ttl)
++{
++	return FIELD_PREP(GENMASK_ULL(63, 48), asid) |
++	       FIELD_PREP(GENMASK_ULL(47, 46), get_trans_granule()) |
++	       FIELD_PREP(GENMASK_ULL(45, 44), scale) |
++	       FIELD_PREP(GENMASK_ULL(43, 39), num) |
++	       FIELD_PREP(GENMASK_ULL(38, 37), ttl) |
++	       FIELD_PREP(BIT_ULL(32), 1) |		/* TTL64 */
++	       FIELD_PREP(GENMASK_ULL(15, 0), domain);
++}
++
++/* Build the upper register of a TLBIP operand pair. */
++static __always_inline unsigned long __tlbip_addr_hi(unsigned long addr)
++{
++	return FIELD_PREP(GENMASK_ULL(43, 0), addr >> PAGE_SHIFT);
++}
++
++/*
++ * Build the lower register of the non-range TLBIP VAE1IS/VALE1IS operand
++ * pair. The TTL field uses the same granule+level encoding as
++ * __tlbi_level().
++ */
++static __always_inline unsigned long
++__tlbip_va_lo(unsigned long asid, unsigned long domain, int tlb_level)
++{
++	unsigned long lo = FIELD_PREP(GENMASK_ULL(63, 48), asid) |
++			   FIELD_PREP(BIT_ULL(32), 1) |		/* TTL64 */
++			   FIELD_PREP(GENMASK_ULL(15, 0), domain);
++
++	if (cpus_have_const_cap(ARM64_HAS_ARMv8_4_TTL) && tlb_level) {
++		unsigned long ttl = (tlb_level & 3) |
++				    (get_trans_granule() << 2);
++
++		lo |= FIELD_PREP(GENMASK_ULL(47, 44), ttl);
++	}
++
++	return lo;
++}
++
++/*
++ * __flush_tlb_range_domain_op - Perform a TLBIP range operation restricted
++ * to a single TLBI Domain
++ *
++ * Same algorithm as __flush_tlb_range_op(), except that the invalidation is
++ * issued with the TLBIP *E1IS instructions carrying @domain, so that only
++ * the PEs of that domain have to process it. Like the regular TLBI
++ * instructions they broadcast to the Inner Shareable domain and are
++ * completed with the usual DSB ISH.
++ *
++ * @op:	TLBIP operation name for the non-range instruction
++ * @rop:	TLBIP operation name for the range instruction
++ * @start:	The start address of the range
++ * @pages:	Range as the number of pages from 'start'
++ * @stride:	Flush granularity
++ * @asid:	The ASID of the task
++ * @domain:	The TLBI Domain the invalidation targets
++ * @tlb_level:	Translation Table level hint, if known
++ */
++#define __flush_tlb_range_domain_op(op, rop, start, pages, stride,	\
++				    asid, domain, tlb_level)		\
++do {									\
++	typeof(start) __flush_start = start;				\
++	typeof(pages) __flush_pages = pages;				\
++	int num = 0;							\
++	int scale = 3;							\
++	unsigned long __lo;						\
++									\
++	while (__flush_pages > 0) {					\
++		if (!system_supports_tlb_range() ||			\
++		    __flush_pages == 1) {				\
++			__lo = __tlbip_va_lo(asid, domain, tlb_level);	\
++			__tlbip(op, __lo,				\
++				__tlbip_addr_hi(__flush_start));	\
++			__tlbip_user(op, __lo,				\
++				__tlbip_addr_hi(__flush_start));	\
++			__flush_start += stride;			\
++			__flush_pages -= stride >> PAGE_SHIFT;		\
++			continue;					\
++		}							\
++									\
++		num = __TLBI_RANGE_NUM(__flush_pages, scale);		\
++		if (num >= 0) {						\
++			__lo = __tlbip_range_lo(asid, domain,		\
++						scale, num, tlb_level);	\
++			__tlbip(rop, __lo,				\
++				__tlbip_addr_hi(__flush_start));	\
++			__tlbip_user(rop, __lo,				\
++				__tlbip_addr_hi(__flush_start));	\
++			__flush_start += __TLBI_RANGE_PAGES(num, scale) << PAGE_SHIFT; \
++			__flush_pages -= __TLBI_RANGE_PAGES(num, scale);\
++		}							\
++		scale--;						\
++	}								\
++} while (0)
++
+ static inline bool __flush_tlb_range_limit_excess(unsigned long start,
+ 		unsigned long end, unsigned long pages, unsigned long stride)
+ {
+@@ -415,12 +602,22 @@ static inline bool __flush_tlb_range_limit_excess(unsigned long start,
+ 	return false;
+ }
+ 
++/*
++ * Issue the TLBI operations for the range [start, end) without a trailing
++ * DSB, which the caller is responsible for issuing.
++ *
++ * When the CPUs the mm has run on fit into a single TLBI Domain, the
++ * invalidation is multicast to that domain with the TLBIP *E1IS
++ * instructions, sparing the CPUs outside of it from having to process the
++ * broadcast.
++ */
+ static inline void __flush_tlb_range_nosync(struct mm_struct *mm,
+-				     unsigned long start, unsigned long end,
+-				     unsigned long stride, bool last_level,
+-				     int tlb_level)
++					    unsigned long start, unsigned long end,
++					    unsigned long stride, bool last_level,
++					    int tlb_level)
+ {
+-	unsigned long asid, pages;
++	unsigned long asid, pages, flags;
++	int domain, scope;
+ 
+ 	start = round_down(start, stride);
+ 	end = round_up(end, stride);
+@@ -434,10 +631,34 @@ static inline void __flush_tlb_range_nosync(struct mm_struct *mm,
+ 	dsb(ishst);
+ 	asid = ASID(mm);
+ 
+-	if (last_level)
+-		__flush_tlb_range_op(vale1is, start, pages, stride, asid, tlb_level, true);
+-	else
+-		__flush_tlb_range_op(vae1is, start, pages, stride, asid, tlb_level, true);
++	scope = flush_tlb_begin(mm, &flags);
++	if (scope == TLB_FLUSH_SCOPE_DOMAIN) {
++		domain = pick_best_domain(mm_cpumask(mm));
++
++		if (last_level)
++			__flush_tlb_range_domain_op(vale1is, rvale1is,
++						    start, pages, stride, asid, domain,
++						    tlb_level);
++		else
++			__flush_tlb_range_domain_op(vae1is, rvae1is,
++						    start, pages, stride, asid, domain,
++						    tlb_level);
++	} else if (scope == TLB_FLUSH_SCOPE_BROADCAST) {
++		if (last_level)
++			__flush_tlb_range_op(vale1is, start, pages, stride,
++					     asid, tlb_level, true);
++		else
++			__flush_tlb_range_op(vae1is, start, pages, stride,
++					     asid, tlb_level, true);
++	} else {
++		if (last_level)
++			__flush_tlb_range_op(vale1, start, pages, stride,
++					     asid, tlb_level, true);
++		else
++			__flush_tlb_range_op(vae1, start, pages, stride,
++					     asid, tlb_level, true);
++	}
++	flush_tlb_end(scope, flags);
+ 
+ 	mmu_notifier_arch_invalidate_secondary_tlbs(mm, start, end);
+ }
+@@ -463,6 +684,52 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
+ 	__flush_tlb_range(vma, start, end, PAGE_SIZE, false, 0);
+ }
+ 
++static inline void __flush_tlb_page_nosync(struct mm_struct *mm,
++					   unsigned long uaddr)
++{
++	unsigned long asid = ASID(mm);
++	int domain, scope;
++	unsigned long lo, flags;
++
++	dsb(ishst);
++
++	scope = flush_tlb_begin(mm, &flags);
++	if (scope == TLB_FLUSH_SCOPE_DOMAIN) {
++		domain = pick_best_domain(mm_cpumask(mm));
++
++		lo = __tlbip_va_lo(asid, domain, 0);
++		__tlbip(vale1is, lo, __tlbip_addr_hi(uaddr));
++		__tlbip_user(vale1is, lo, __tlbip_addr_hi(uaddr));
++	} else {
++		unsigned long addr = __TLBI_VADDR(uaddr, asid);
++
++		if (scope == TLB_FLUSH_SCOPE_BROADCAST) {
++			__tlbi(vale1is, addr);
++			__tlbi_user(vale1is, addr);
++		} else {
++			__tlbi(vale1, addr);
++			__tlbi_user(vale1, addr);
++		}
++	}
++	flush_tlb_end(scope, flags);
++
++	mmu_notifier_arch_invalidate_secondary_tlbs(mm, uaddr & PAGE_MASK,
++					(uaddr & PAGE_MASK) + PAGE_SIZE);
++}
++
++static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
++				 unsigned long uaddr)
++{
++	return __flush_tlb_page_nosync(vma->vm_mm, uaddr);
++}
++
++static inline void flush_tlb_page(struct vm_area_struct *vma,
++				  unsigned long uaddr)
++{
++	flush_tlb_page_nosync(vma, uaddr);
++	dsb(ish);
++}
++
+ static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
+ {
+ 	const unsigned long stride = PAGE_SIZE;
+diff --git a/arch/arm64/include/asm/tlbid.h b/arch/arm64/include/asm/tlbid.h
+new file mode 100644
+index 000000000000..4d08eb94a089
+--- /dev/null
++++ b/arch/arm64/include/asm/tlbid.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (C) 2026 Huawei Ltd.
++ */
++#ifndef __ASM_TLBID_H
++#define __ASM_TLBID_H
++
++#include <linux/types.h>
++
++#ifdef CONFIG_ARM64_TLBID
++
++struct tlbi_target {
++	u32 identifier;
++	s32 *domains;
++	s32 nr_domain;
++	struct list_head list;
++};
++
++int add_target(int type, struct tlbi_target *target);
++void tlbid_data_reset(void);
++int __init parse_tlbid_topology(void);
++int pick_best_domain(const cpumask_t *active_cpus);
++
++#else
++static inline int pick_best_domain(const cpumask_t *active_cpus) { return 0; }
++
++#endif /* ! CONFIG_ARM64_TLBID */
++#endif
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index 40abd5ae97b0..72f2ae4a8f72 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -231,6 +231,7 @@ static const struct arm64_ftr_bits ftr_id_aa64isar2[] = {
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_NONSTRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_LUT_SHIFT, 4, 0),
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_NONSTRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_CSSC_SHIFT, 4, 0),
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_NONSTRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_RPRFM_SHIFT, 4, 0),
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_SYSINSTR_128_SHIFT, 4, 0),
+ 	ARM64_FTR_BITS(FTR_HIDDEN, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_CLRBHB_SHIFT, 4, 0),
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_BC_SHIFT, 4, 0),
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64ISAR2_EL1_MOPS_SHIFT, 4, 0),
+@@ -468,6 +469,12 @@ static const struct arm64_ftr_bits ftr_id_aa64mmfr3[] = {
+ 	ARM64_FTR_END,
+ };
+ 
++static const struct arm64_ftr_bits ftr_id_aa64mmfr4[] = {
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64MMFR4_EL1_TLBID_SHIFT, 4, 0),
++	S_ARM64_FTR_BITS(FTR_HIDDEN, FTR_STRICT, FTR_LOWER_SAFE, ID_AA64MMFR4_EL1_E2H0_SHIFT, 4, 0),
++	ARM64_FTR_END,
++};
++
+ static const struct arm64_ftr_bits ftr_ctr[] = {
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_STRICT, FTR_EXACT, 31, 1, 1), /* RES1 */
+ 	ARM64_FTR_BITS(FTR_VISIBLE, FTR_STRICT, FTR_LOWER_SAFE, CTR_EL0_DIC_SHIFT, 1, 1),
+@@ -698,6 +705,18 @@ static const struct arm64_ftr_bits ftr_mpamidr[] = {
+ 	ARM64_FTR_END,
+ };
+ 
++static const struct arm64_ftr_bits ftr_tlbididr[] = {
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_NONSTRICT, FTR_LOWER_SAFE,
++			TLBIDIDR_EL1_NVOS_SHIFT, TLBIDIDR_EL1_NVOS_WIDTH, 0),
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_NONSTRICT, FTR_LOWER_SAFE,
++			TLBIDIDR_EL1_NOS_SHIFT, TLBIDIDR_EL1_NOS_WIDTH, 0),
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_NONSTRICT, FTR_LOWER_SAFE,
++			TLBIDIDR_EL1_NVIS_SHIFT, TLBIDIDR_EL1_NVIS_WIDTH, 0),
++	ARM64_FTR_BITS(FTR_HIDDEN, FTR_NONSTRICT, FTR_LOWER_SAFE,
++			TLBIDIDR_EL1_NIS_SHIFT, TLBIDIDR_EL1_NIS_WIDTH, 0),
++	ARM64_FTR_END,
++};
++
+ /*
+  * Common ftr bits for a 32bit register with all hidden, strict
+  * attributes, with 4bit feature fields and a default safe value of
+@@ -816,6 +835,7 @@ static const struct __ftr_reg_entry {
+ 	ARM64_FTR_REG_OVERRIDE(SYS_ID_AA64MMFR2_EL1, ftr_id_aa64mmfr2,
+ 			       &id_aa64mmfr2_override),
+ 	ARM64_FTR_REG(SYS_ID_AA64MMFR3_EL1, ftr_id_aa64mmfr3),
++	ARM64_FTR_REG(SYS_ID_AA64MMFR4_EL1, ftr_id_aa64mmfr4),
+ 
+ 	/* Op1 = 0, CRn = 1, CRm = 2 */
+ 	ARM64_FTR_REG(SYS_ZCR_EL1, ftr_zcr),
+@@ -823,6 +843,7 @@ static const struct __ftr_reg_entry {
+ 
+ 	/* Op1 = 0, CRn = 10, CRm = 4 */
+ 	ARM64_FTR_REG(SYS_MPAMIDR_EL1, ftr_mpamidr),
++	ARM64_FTR_REG(SYS_TLBIDIDR_EL1, ftr_tlbididr),
+ 
+ 	/* Op1 = 1, CRn = 0, CRm = 0 */
+ 	ARM64_FTR_REG(SYS_GMID_EL1, ftr_gmid),
+@@ -1116,6 +1137,7 @@ void __init init_cpu_features(struct cpuinfo_arm64 *info)
+ 	init_cpu_ftr_reg(SYS_ID_AA64MMFR1_EL1, info->reg_id_aa64mmfr1);
+ 	init_cpu_ftr_reg(SYS_ID_AA64MMFR2_EL1, info->reg_id_aa64mmfr2);
+ 	init_cpu_ftr_reg(SYS_ID_AA64MMFR3_EL1, info->reg_id_aa64mmfr3);
++	init_cpu_ftr_reg(SYS_ID_AA64MMFR4_EL1, info->reg_id_aa64mmfr4);
+ 	init_cpu_ftr_reg(SYS_ID_AA64PFR0_EL1, info->reg_id_aa64pfr0);
+ 	init_cpu_ftr_reg(SYS_ID_AA64PFR1_EL1, info->reg_id_aa64pfr1);
+ 	init_cpu_ftr_reg(SYS_ID_AA64PFR2_EL1, info->reg_id_aa64pfr2);
+@@ -1151,6 +1173,9 @@ void __init init_cpu_features(struct cpuinfo_arm64 *info)
+ 	    id_aa64pfr1_mpamfrac(info->reg_id_aa64pfr1)))
+ 		init_cpu_ftr_reg(SYS_MPAMIDR_EL1, info->reg_mpamidr);
+ 
++	if (id_aa64mmfr4_tlbid(info->reg_id_aa64mmfr4))
++		init_cpu_ftr_reg(SYS_TLBIDIDR_EL1, info->reg_tlbididr);
++
+ 	if (id_aa64pfr1_mte(info->reg_id_aa64pfr1))
+ 		init_cpu_ftr_reg(SYS_GMID_EL1, info->reg_gmid);
+ 
+@@ -1424,6 +1449,10 @@ void update_cpu_features(int cpu,
+ 					info->reg_mpamidr, boot->reg_mpamidr);
+ 	}
+ 
++	if (id_aa64mmfr4_tlbid(info->reg_id_aa64mmfr4))
++		taint |= check_update_ftr_reg(SYS_TLBIDIDR_EL1, cpu,
++					info->reg_tlbididr, boot->reg_tlbididr);
++
+ 	/*
+ 	 * The kernel uses the LDGM/STGM instructions and the number of tags
+ 	 * they read/write depends on the GMID_EL1.BS field. Check that the
+@@ -1516,6 +1545,7 @@ u64 __read_sysreg_by_encoding(u32 sys_id)
+ 	read_sysreg_case(SYS_ID_AA64MMFR1_EL1);
+ 	read_sysreg_case(SYS_ID_AA64MMFR2_EL1);
+ 	read_sysreg_case(SYS_ID_AA64MMFR3_EL1);
++	read_sysreg_case(SYS_ID_AA64MMFR4_EL1);
+ 	read_sysreg_case(SYS_ID_AA64ISAR0_EL1);
+ 	read_sysreg_case(SYS_ID_AA64ISAR1_EL1);
+ 	read_sysreg_case(SYS_ID_AA64ISAR2_EL1);
+@@ -2548,6 +2578,48 @@ static void mpam_extra_caps(void)
+ 		__enable_mpam_hcr();
+ }
+ 
++static bool __maybe_unused
++test_has_tlbid(const struct arm64_cpu_capabilities *entry, int scope)
++{
++	u64 tlbididr = read_sanitised_ftr_reg(SYS_TLBIDIDR_EL1);
++	u64 mmfr4 = read_sanitised_ftr_reg(SYS_ID_AA64MMFR4_EL1);
++
++	if (!id_aa64mmfr4_tlbid(mmfr4))
++		return false;
++
++	return (FIELD_GET(TLBIDIDR_EL1_NOS, tlbididr) > 0) &&
++	       (FIELD_GET(TLBIDIDR_EL1_NIS, tlbididr) > 0);
++}
++
++static void __maybe_unused
++cpu_enable_tlbid(const struct arm64_cpu_capabilities *entry)
++{
++	if (is_kernel_in_hyp_mode()) {
++		/*
++		 * TODO:
++		 * - Configure HCRX_EL2 and HCR_EL2 to enable VTLBID transforms
++		 *   at EL1.
++		 * - Configure HFGRTR2_EL2 to trap MRS read of TLBIDIDR_EL1 at
++		 *   EL1.
++		 * - Configure SCTLR2MASK_EL2 to make SCTLR2_EL2.TLBOSNIS
++		 *   writable.
++		 * - Configure SCTLR2_EL2 to enable TLBI *OS* executed at EL2
++		 *   affect TLBs in both Outer shareability domain and Inner
++		 *   shareability domain.
++		 * - Reset VTLBIDn_EL1 and VTLBIDOSn_EL2.
++		 */
++	} else {
++		/*
++		 * TODO:
++		 * - Configure SCTLR2MASK_EL1 to make SCTLR2_EL1.TLBOSNIS
++		 *   writable.
++		 * - Configure SCTLR2_EL1 to enable TLBI *OS* executed at EL1
++		 *   affect TLBs in both Outer shareability domain and Inner
++		 *   shareability domain.
++		 */
++	}
++}
++
+ #ifdef CONFIG_FAST_SYSCALL
+ #include <asm/xcall.h>
+ DEFINE_STATIC_KEY_FALSE(xcall_enable);
+@@ -3325,6 +3397,22 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
+ 		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
+ 		.matches = has_vip_smt_support,
+ 	},
++#endif
++	{
++		.desc = "128-bit System Instructions",
++		.capability = ARM64_HAS_SYSINSTR128,
++		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
++		.matches = has_cpuid_feature,
++		ARM64_CPUID_FIELDS(ID_AA64ISAR2_EL1, SYSINSTR_128, IMP)
++	},
++#ifdef CONFIG_ARM64_TLBID
++	{
++		.desc = "TLBI Domains",
++		.capability = ARM64_HAS_TLBID,
++		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
++		.matches = test_has_tlbid,
++		.cpu_enable = cpu_enable_tlbid,
++	},
+ #endif
+ 	{},
+ };
+diff --git a/arch/arm64/kernel/cpuinfo.c b/arch/arm64/kernel/cpuinfo.c
+index 492cbb4ff874..314c72d8398f 100644
+--- a/arch/arm64/kernel/cpuinfo.c
++++ b/arch/arm64/kernel/cpuinfo.c
+@@ -333,6 +333,7 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
+ 	info->reg_id_aa64mmfr1 = read_cpuid(ID_AA64MMFR1_EL1);
+ 	info->reg_id_aa64mmfr2 = read_cpuid(ID_AA64MMFR2_EL1);
+ 	info->reg_id_aa64mmfr3 = read_cpuid(ID_AA64MMFR3_EL1);
++	info->reg_id_aa64mmfr4 = read_cpuid(ID_AA64MMFR4_EL1);
+ 	info->reg_id_aa64pfr0 = read_cpuid(ID_AA64PFR0_EL1);
+ 	info->reg_id_aa64pfr1 = read_cpuid(ID_AA64PFR1_EL1);
+ 	info->reg_id_aa64pfr2 = read_cpuid(ID_AA64PFR2_EL1);
+@@ -352,6 +353,10 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
+ 	    id_aa64pfr1_mpamfrac(info->reg_id_aa64pfr1)))
+ 		info->reg_mpamidr = read_cpuid(MPAMIDR_EL1);
+ 
++	if (IS_ENABLED(CONFIG_ARM64_TLBID) &&
++	    id_aa64mmfr4_tlbid(info->reg_id_aa64mmfr4))
++		info->reg_tlbididr = read_cpuid(TLBIDIDR_EL1);
++
+ 	cpuinfo_detect_icache_policy(info);
+ }
+ 
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 1131f96fa948..4290231e02e0 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -351,6 +351,9 @@ void arch_cpuhp_cleanup_dead_cpu(unsigned int cpu)
+ 
+ 	pr_debug("CPU%u: shutdown\n", cpu);
+ 
++	if (system_supports_tlbid())
++		clear_tasks_mm_cpumask(cpu);
++
+ 	/*
+ 	 * Now that the dying CPU is beyond the point of no return w.r.t.
+ 	 * in-kernel synchronisation, try to get the firwmare to help us to
+diff --git a/arch/arm64/mm/Kconfig b/arch/arm64/mm/Kconfig
+index 315b3322feb5..03b1b7a66016 100644
+--- a/arch/arm64/mm/Kconfig
++++ b/arch/arm64/mm/Kconfig
+@@ -14,3 +14,13 @@ config PFN_RANGE_ALLOC
+ 		the linear mapping granule of this range is never larger than PMD.
+ 
+ 		If unsure, say N.
++
++config TLBID_KUNIT_TEST
++	bool "KUnit tests for TLBI" if !KUNIT_ALL_TESTS
++	depends on KUNIT=y
++	depends on ARM64_TLBID && ACPI
++	default KUNIT_ALL_TESTS
++	help
++	  Enable this option to run tests for TLBID.
++
++	  If unsure, say N.
+diff --git a/arch/arm64/mm/Makefile b/arch/arm64/mm/Makefile
+index c02aeb729717..9f98ed2868bf 100644
+--- a/arch/arm64/mm/Makefile
++++ b/arch/arm64/mm/Makefile
+@@ -11,6 +11,7 @@ obj-$(CONFIG_TRANS_TABLE)	+= trans_pgd.o
+ obj-$(CONFIG_TRANS_TABLE)	+= trans_pgd-asm.o
+ obj-$(CONFIG_DEBUG_VIRTUAL)	+= physaddr.o
+ obj-$(CONFIG_ARM64_MTE)		+= mteswap.o
++obj-$(CONFIG_ARM64_TLBID)	+= tlbid.o
+ KASAN_SANITIZE_physaddr.o	+= n
+ 
+ obj-$(CONFIG_KASAN)		+= kasan_init.o
+diff --git a/arch/arm64/mm/context.c b/arch/arm64/mm/context.c
+index b2ac06246327..ce314cb9fd09 100644
+--- a/arch/arm64/mm/context.c
++++ b/arch/arm64/mm/context.c
+@@ -206,6 +206,9 @@ static u64 new_context(struct mm_struct *mm)
+ 	/* We have more ASIDs than CPUs, so this will always succeed */
+ 	asid = find_next_zero_bit(asid_map, NUM_USER_ASIDS, 1);
+ 
++	if (system_supports_tlbid())
++		cpumask_clear(mm_cpumask(mm));
++
+ set_asid:
+ 	__set_bit(asid, asid_map);
+ 	cur_idx = asid;
+@@ -215,8 +218,8 @@ static u64 new_context(struct mm_struct *mm)
+ void check_and_switch_context(struct mm_struct *mm)
+ {
+ 	unsigned long flags;
+-	unsigned int cpu;
+ 	u64 asid, old_active_asid;
++	unsigned int cpu = smp_processor_id();
+ 
+ 	if (system_supports_cnp())
+ 		cpu_set_reserved_ttbr0();
+@@ -251,7 +254,6 @@ void check_and_switch_context(struct mm_struct *mm)
+ 		atomic64_set(&mm->context.id, asid);
+ 	}
+ 
+-	cpu = smp_processor_id();
+ 	if (cpumask_test_and_clear_cpu(cpu, &tlb_flush_pending))
+ 		local_flush_tlb_all();
+ 
+@@ -262,6 +264,9 @@ void check_and_switch_context(struct mm_struct *mm)
+ 
+ 	arm64_apply_bp_hardening();
+ 
++	if (system_supports_tlbid())
++		cpumask_set_cpu(cpu, mm_cpumask(mm));
++
+ 	/*
+ 	 * Defer TTBR0_EL1 setting for user threads to uaccess_enable() when
+ 	 * emulating PAN.
+diff --git a/arch/arm64/mm/test_tlbid.c b/arch/arm64/mm/test_tlbid.c
+new file mode 100644
+index 000000000000..40e2afd2efd6
+--- /dev/null
++++ b/arch/arm64/mm/test_tlbid.c
+@@ -0,0 +1,178 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* This file is intended to be included into tlbid.c
++ * Copyright (C) 2026 Huawei Ltd.
++ */
++
++#include <kunit/test.h>
++
++static struct tlbid_data fake_tlbid_data __read_mostly = {
++	.nr_acpi_domain = 1,
++	.nis = 0,
++	.nvis = 0,
++	.nos = 0,
++	.nvos = 0,
++};
++
++static struct acpi_madt_generic_interrupt fake_madt_gicc[NR_CPUS];
++
++static void __init reset_real_tlbid(void)
++{
++	tlbid_data_reset();
++	memcpy(&tlbid_data, &fake_tlbid_data, sizeof(tlbid_data));
++}
++
++static int __init setup_fake_tlbid(struct kunit *test)
++{
++	int ret, cpu, max_domains = 1 << 16;
++	struct acpi_madt_generic_interrupt *gicc;
++	struct tlbi_target *target;
++
++	if (num_possible_cpus() == 1)
++		return 1;
++
++	memcpy(&fake_tlbid_data, &tlbid_data, sizeof(tlbid_data));
++	tlbid_data.nis = 8;
++	tlbid_data.nvis = 0;
++	tlbid_data.nos = 8;
++	tlbid_data.nvos = 0;
++	for_each_possible_cpu(cpu)
++		memcpy(&fake_madt_gicc[cpu], acpi_cpu_get_madt_gicc(cpu),
++		       sizeof(struct acpi_madt_generic_interrupt));
++
++	tlbid_data.acpi_domain = kcalloc(BITS_TO_LONGS(max_domains),
++					 sizeof(long), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, tlbid_data.acpi_domain);
++
++	INIT_LIST_HEAD(&tlbid_data.target_list[ACPI_TLBI_TYPE_PROCESSOR]);
++	INIT_LIST_HEAD(&tlbid_data.target_list[ACPI_TLBI_TYPE_SMMU]);
++
++	/*
++	 * Fake TLBI domain topology:
++	 *   domain0: [0, num_possible_cpus())
++	 *   domain1: [0, (num_possible_cpus() / 2)
++	 *   domain2: [num_possible_cpus() / 2, num_possible_cpus())
++	 */
++	for_each_possible_cpu(cpu) {
++		target = kzalloc(sizeof(*target), GFP_KERNEL);
++		KUNIT_ASSERT_NOT_ERR_OR_NULL(test, target);
++
++		/* The ACPI Processor UID of the corresponding GICC MADT entry */
++		gicc = acpi_cpu_get_madt_gicc(cpu);
++		gicc->uid = cpu;
++		target->nr_domain = 2;
++		target->identifier = cpu;
++		target->domains = kcalloc(target->nr_domain,
++					  sizeof(*target->domains), GFP_KERNEL);
++		KUNIT_ASSERT_NOT_ERR_OR_NULL(test, target->domains);
++		target->domains[0] = 0;
++		target->domains[1] = (cpu < (num_possible_cpus() / 2)) ? 1 : 2;
++		ret = add_target(ACPI_TLBI_TYPE_PROCESSOR, target);
++		KUNIT_ASSERT_EQ(test, ret, 0);
++	}
++
++	ret = parse_tlbid_topology();
++	KUNIT_ASSERT_EQ(test, ret, 0);
++
++	for_each_possible_cpu(cpu)
++		memcpy(acpi_cpu_get_madt_gicc(cpu), &fake_madt_gicc[cpu],
++		       sizeof(struct acpi_madt_generic_interrupt));
++
++	return 0;
++}
++
++static void __init test_parse_tlbid_topology(struct kunit *test)
++{
++	struct tlbi_domain *actbl[3];
++	cpumask_t tmp;
++	int cpu;
++
++	if (setup_fake_tlbid(test))
++		return;
++
++	actbl[0] = &tlbid_data.cpu_domain[num_possible_cpus() - 1][0];
++	actbl[1] = &tlbid_data.cpu_domain[(num_possible_cpus() / 2) - 1][0];
++	actbl[2] = &tlbid_data.cpu_domain[(num_possible_cpus() / 2) - 1][1];
++
++	KUNIT_EXPECT_EQ(test, actbl[0]->id, 0);
++	KUNIT_EXPECT_TRUE(test, cpumask_equal(cpu_possible_mask,
++				&actbl[0]->cpumask));
++
++	KUNIT_EXPECT_EQ(test, actbl[1]->id, 1);
++	cpumask_clear(&tmp);
++	for_each_possible_cpu(cpu) {
++		if (cpu >= (num_possible_cpus() / 2))
++			continue;
++		cpumask_set_cpu(cpu, &tmp);
++	}
++	KUNIT_EXPECT_TRUE(test, cpumask_equal(&tmp, &actbl[1]->cpumask));
++
++	KUNIT_EXPECT_EQ(test, actbl[2]->id, 2);
++	cpumask_clear(&tmp);
++	for_each_possible_cpu(cpu) {
++		if (cpu < (num_possible_cpus() / 2))
++			continue;
++		cpumask_set_cpu(cpu, &tmp);
++	}
++	KUNIT_EXPECT_TRUE(test, cpumask_equal(&tmp, &actbl[2]->cpumask));
++
++	for_each_possible_cpu(cpu) {
++		struct tlbi_domain *domain;
++		int i;
++
++		for (i = 0; i < tlbid_data.nr_acpi_domain; i++) {
++			domain = &tlbid_data.cpu_domain[cpu][i];
++			if (domain != actbl[0] &&
++			    domain != actbl[1] &&
++			    domain != actbl[2]) {
++				KUNIT_EXPECT_EQ(test, domain->id, TLBI_INV_DOMAIN);
++			}
++		}
++	}
++
++	reset_real_tlbid();
++}
++
++static void __init test_pick_best_domain(struct kunit *test)
++{
++	int domain, cpu;
++	cpumask_t tmp;
++
++	if (setup_fake_tlbid(test))
++		return;
++
++	domain = pick_best_domain(cpu_possible_mask);
++	KUNIT_EXPECT_EQ(test, domain, 0);
++
++	cpumask_clear(&tmp);
++	for_each_possible_cpu(cpu) {
++		if (cpu >= (num_possible_cpus() / 2))
++			continue;
++		cpumask_set_cpu(cpu, &tmp);
++	}
++	domain = pick_best_domain(&tmp);
++	KUNIT_EXPECT_EQ(test, domain, 1);
++
++	cpumask_clear(&tmp);
++	for_each_possible_cpu(cpu) {
++		if (cpu < (num_possible_cpus() / 2))
++			continue;
++		cpumask_set_cpu(cpu, &tmp);
++	}
++	domain = pick_best_domain(&tmp);
++	KUNIT_EXPECT_EQ(test, domain, 2);
++
++	reset_real_tlbid();
++}
++
++static struct kunit_case __refdata tlbidomain_test_cases[] = {
++	KUNIT_CASE(test_parse_tlbid_topology),
++	KUNIT_CASE(test_pick_best_domain),
++	{}
++};
++
++static struct kunit_suite tlbidomain_test_suite = {
++	.name = "tlbidomain_test_suite",
++	.test_cases = tlbidomain_test_cases,
++};
++
++kunit_test_init_section_suites(&tlbidomain_test_suite);
+diff --git a/arch/arm64/mm/tlbid.c b/arch/arm64/mm/tlbid.c
+new file mode 100644
+index 000000000000..f8993e734ce5
+--- /dev/null
++++ b/arch/arm64/mm/tlbid.c
+@@ -0,0 +1,341 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Copyright (C) 2026 Huawei Ltd. */
++
++#define pr_fmt(fmt) "tlbid: " fmt
++
++#include <linux/acpi.h>
++#include <linux/cpumask.h>
++
++#include <asm/cpu.h>
++#include <asm/sysreg.h>
++#include <asm/cpufeature.h>
++#include <asm/tlbid.h>
++
++struct tlbi_domain {
++	cpumask_t cpumask;
++	int id;
++};
++
++struct tlbid_data {
++	struct list_head	target_list[ACPI_TLBI_TYPE_RESERVED];
++	unsigned long		*acpi_domain;
++	u32			nr_acpi_domain;
++	struct tlbi_domain	*cpu_domain[NR_CPUS];
++	u8			nis;	/* TLBIDIDR_EL1.NIS */
++	u8			nvis;	/* TLBIDIDR_EL1.NVIS */
++	u8			nos;	/* TLBIDIDR_EL1.NOS */
++	u8			nvos;	/* TLBIDIDR_EL1.NVOS */
++};
++
++static struct tlbid_data tlbid_data __read_mostly;
++
++#define TLBI_INV_DOMAIN			(-1)
++
++/*
++ * sanitised_ids - Sanitise TLBID domain bit configurations
++ *
++ * Sanitise that NIS/NVIS and NOS/NVOS configurations follow Arm architecture
++ * constraints: if outer domain bits are zero, inner domain bits must also be
++ * zero. Outputs error and zeroes out all domain counts if sanitise fails.
++ */
++static bool sanitised_ids(u8 nvos, u8 nos, u8 nvis, u8 nis)
++{
++	bool inv = false;
++
++	switch (nos) {
++	case 0:
++		inv = nvos > 0;
++		break;
++	case 1 ... 8:
++		inv = nvos > 6;
++		break;
++	case 9 ... 16:
++		inv = nvos > 5;
++		break;
++	}
++
++	if (inv) {
++		pr_err("Illegal value of NVOS(%u) for NOS(%u)\n", nvos, nos);
++		goto on_error;
++	}
++
++	switch (nis) {
++	case 0:
++		inv = nvis > 0;
++		break;
++	case 1 ... 8:
++		inv = nvis > 6;
++		break;
++	case 9 ... 16:
++		inv = nvis > 5;
++		break;
++	}
++
++	if (!inv)
++		return true;
++
++	pr_err("Illegal value of NVIS(%u) for NIS(%u)\n", nvis, nis);
++
++on_error:
++	return false;
++}
++
++static int __init tlbid_data_init(void)
++{
++	u64 tlbididr = read_sanitised_ftr_reg(SYS_TLBIDIDR_EL1);
++	u8 nvos, nos, nvis, nis;
++	int type, cpu;
++	u16 max_id;
++
++	nvos = FIELD_GET(TLBIDIDR_EL1_NVOS, tlbididr);
++	nos = FIELD_GET(TLBIDIDR_EL1_NOS, tlbididr);
++	nvis = FIELD_GET(TLBIDIDR_EL1_NVIS, tlbididr);
++	nis = FIELD_GET(TLBIDIDR_EL1_NIS, tlbididr);
++
++	if (sanitised_ids(nvos, nos, nvis, nis)) {
++		tlbid_data.nvos = nvos;
++		tlbid_data.nos = nos;
++		tlbid_data.nvis = nvis;
++		tlbid_data.nis = nis;
++	} else {
++		tlbid_data.nvos = 0;
++		tlbid_data.nos = 0;
++		tlbid_data.nvis = 0;
++		tlbid_data.nis = 0;
++	}
++
++	type = ACPI_TLBI_TYPE_PROCESSOR;
++	while (type != ACPI_TLBI_TYPE_RESERVED)
++		INIT_LIST_HEAD(&tlbid_data.target_list[type++]);
++
++	tlbid_data.acpi_domain = NULL;
++	tlbid_data.nr_acpi_domain = 1;
++
++	for_each_possible_cpu(cpu)
++		tlbid_data.cpu_domain[cpu] = NULL;
++
++	if (!system_supports_tlbid())
++		return 0;
++
++	max_id = (1 << max(tlbid_data.nos, tlbid_data.nis));
++	tlbid_data.acpi_domain = kcalloc(BITS_TO_LONGS(max_id),
++					 sizeof(long), GFP_KERNEL);
++	if (!tlbid_data.acpi_domain)
++		return -ENOMEM;
++
++	return 0;
++}
++
++void __init tlbid_data_reset(void)
++{
++	int cpu, type = ACPI_TLBI_TYPE_PROCESSOR;
++	struct tlbi_target *target, *next;
++
++	while (type != ACPI_TLBI_TYPE_RESERVED) {
++		struct list_head *head = &tlbid_data.target_list[type++];
++
++		list_for_each_entry_safe(target, next, head, list) {
++			list_del(&target->list);
++			kfree(target->domains);
++			kfree(target);
++		}
++	}
++
++	for_each_possible_cpu(cpu) {
++		kfree(tlbid_data.cpu_domain[cpu]);
++		tlbid_data.cpu_domain[cpu] = NULL;
++	}
++
++	kfree(tlbid_data.acpi_domain);
++	tlbid_data.acpi_domain = NULL;
++	tlbid_data.nr_acpi_domain = 1;
++	tlbid_data.nis = 0;
++	tlbid_data.nos = 0;
++	tlbid_data.nvis = 0;
++	tlbid_data.nvos = 0;
++}
++
++/*
++ * find_target - Find TLBI target by type and identifier
++ *
++ * Looks up the tlbi_target structure associated with the given type and cpu.
++ * For PROCESSOR type, converts CPU logical ID to ACPI Processor UID.
++ */
++static struct tlbi_target *find_target(int type, int cpu)
++{
++	struct tlbi_target *target = NULL;
++	struct list_head *head;
++	int uid;
++
++	switch (type) {
++	case ACPI_TLBI_TYPE_PROCESSOR:
++		uid = get_acpi_id_for_cpu(cpu);
++		break;
++	default:
++		pr_err("Only support Processor as TLBI broadcast target\n");
++		return NULL;
++	}
++
++	head = &tlbid_data.target_list[type];
++	list_for_each_entry(target, head, list) {
++		if (target->identifier == uid)
++			return target;
++	}
++
++	return NULL;
++}
++
++int add_target(int type, struct tlbi_target *target)
++{
++	s32 max_id = 1 << max(tlbid_data.nis, tlbid_data.nos);
++	s32 i;
++
++	for (i = 0; i < target->nr_domain; i++) {
++		s32 id = target->domains[i];
++
++		if (id >= max_id) {
++			pr_err("ACPI table reports invalid domain id %d", id);
++			return -EINVAL;
++		}
++		if ((id > 0) && !test_and_set_bit(id, tlbid_data.acpi_domain))
++			tlbid_data.nr_acpi_domain += 1;
++	}
++
++	INIT_LIST_HEAD(&target->list);
++	list_add_tail(&target->list, &tlbid_data.target_list[type]);
++	return 0;
++}
++
++/*
++ * pick_best_domain - Select optimal TLBI domain for given CPUs
++ *
++ * Iterates through cpu_domain table to find a domain whose cpumask exactly
++ * matches the given active CPUs. This allows targeted TLBI instead of
++ * broadcasting to all CPUs, improving TLB invalidation efficiency.
++ * Returns domain ID on success, 0 on failure.
++ */
++int pick_best_domain(const cpumask_t *active_cpus)
++{
++	struct tlbi_domain *domain;
++	cpumask_t tmp;
++	int nr_cpu;
++
++	/* Domain 0 is the only supported for Innern Shareable TLBI */
++	if (unlikely(tlbid_data.nr_acpi_domain == 1))
++		goto domain0;
++
++	nr_cpu = cpumask_weight(active_cpus);
++	if (unlikely(nr_cpu == 0))
++		goto domain0;
++
++	do {
++		domain = &tlbid_data.cpu_domain[nr_cpu - 1][0];
++		while (domain->id != TLBI_INV_DOMAIN) {
++			if (cpumask_and(&tmp, active_cpus, &domain->cpumask) &&
++			    cpumask_equal(&tmp, active_cpus))
++				return domain->id;
++			domain++;
++		}
++	} while (++nr_cpu <= num_possible_cpus());
++
++domain0:
++	return 0;
++}
++
++/*
++ * parse_tlbid_topology - Initialize TLBI domain mapping tables
++ *
++ * Allocates and populates the cpu_domain table:
++ * 1. Build CPU-to-domain mapping from ACPI-parsed target data
++ * 2. Reorganize data for efficient lookup (domain x CPU matrix)
++ *
++ * Returns 0 on success, -ENOMEM on allocation failure, -EVINAL on topology
++ * parse failure
++ */
++int __init parse_tlbid_topology(void)
++{
++	struct tlbi_domain *src, *dst;
++	struct tlbi_target *target;
++	int cpu, err = 0;
++	s32 i;
++
++	if (tlbid_data.nr_acpi_domain == 1)
++		return -EINVAL;
++
++	pr_info("ACPI report %d TLBI Domain(s).\n", tlbid_data.nr_acpi_domain);
++
++	/*
++	 * Allocate a sparse table to map the CPU count to domain list sharing
++	 * the same CPU count.
++	 *
++	 * NOTICE: Each domain is assumed to contain all system-wide SMMUs,
++	 * Any broadcast in a specific domain must wait replies from all SMMUs
++	 * before it complete.
++	 */
++	for_each_possible_cpu(cpu) {
++		tlbid_data.cpu_domain[cpu] =
++			kcalloc(tlbid_data.nr_acpi_domain,
++				sizeof(struct tlbi_domain), GFP_KERNEL);
++		if (!tlbid_data.cpu_domain[cpu]) {
++			err = -ENOMEM;
++			goto on_error;
++		}
++		for (i = 0; i < tlbid_data.nr_acpi_domain; i++) {
++			cpumask_clear(&tlbid_data.cpu_domain[cpu][i].cpumask);
++			tlbid_data.cpu_domain[cpu][i].id = cpu ?
++							   TLBI_INV_DOMAIN : i;
++		}
++	}
++
++	/* Initialize the cpumask associated with each tlbi domain */
++	for_each_possible_cpu(cpu) {
++		target = find_target(ACPI_TLBI_TYPE_PROCESSOR, cpu);
++		if (!target) {
++			err = -EINVAL;
++			goto on_error;
++		}
++		for (i = 0; i < target->nr_domain; i++) {
++			/* Record all CPUs belong to the same domain */
++			src = &tlbid_data.cpu_domain[0][target->domains[i]];
++			cpumask_set_cpu(cpu, &(src->cpumask));
++		}
++	}
++
++	/* Move each domain data onto the right position in sparse table */
++	for (i = 0; i < tlbid_data.nr_acpi_domain; i++) {
++		src = &tlbid_data.cpu_domain[0][i];
++		cpu = cpumask_weight(&(src->cpumask));
++
++		if (cpu == 1)
++			continue;
++
++		if (cpu == 0) {
++			pr_err("TLBI Domain %d has no CPU\n", i);
++			err = -EINVAL;
++			goto on_error;
++		}
++
++		dst = &tlbid_data.cpu_domain[cpu - 1][0];
++		while (dst->id != TLBI_INV_DOMAIN) dst++;
++		memcpy(dst, src, sizeof(*dst));
++		cpumask_clear(&src->cpumask);
++		src->id = TLBI_INV_DOMAIN;
++	}
++
++	return 0;
++
++on_error:
++	tlbid_data_reset();
++	return err;
++}
++
++static int __init arm64_tlbid_register_cpus(void)
++{
++	return tlbid_data_init();
++}
++/* Must occur before acpi_tlbid_init() from acpi_arm_init() */
++arch_initcall(arm64_tlbid_register_cpus)
++
++#ifdef CONFIG_TLBID_KUNIT_TEST
++#include "test_tlbid.c"
++#endif
+diff --git a/arch/arm64/tools/cpucaps b/arch/arm64/tools/cpucaps
+index 8b5b9944884c..c0409ba0dcca 100644
+--- a/arch/arm64/tools/cpucaps
++++ b/arch/arm64/tools/cpucaps
+@@ -119,8 +119,8 @@ HAS_COPY_OPT
+ HAS_LSUI
+ HAS_FPMR
+ HAS_BBML3
+-KABI_RESERVE_12
+-KABI_RESERVE_13
++HAS_SYSINSTR128
++HAS_TLBID
+ KABI_RESERVE_14
+ KABI_RESERVE_15
+ KABI_RESERVE_16
+diff --git a/arch/arm64/tools/sysreg b/arch/arm64/tools/sysreg
+index 68f756a2e39d..2155315581b2 100644
+--- a/arch/arm64/tools/sysreg
++++ b/arch/arm64/tools/sysreg
+@@ -1679,7 +1679,7 @@ UnsignedEnum	43:40	TraceFilt
+ 	0b0000	NI
+ 	0b0001	IMP
+ EndEnum
+-UnsignedEnum	39:36	DoubleLock
++SignedEnum	39:36	DoubleLock
+ 	0b0000	IMP
+ 	0b1111	NI
+ EndEnum
+@@ -2289,6 +2289,59 @@ UnsignedEnum	3:0	TCRX
+ EndEnum
+ EndSysreg
+ 
++Sysreg	ID_AA64MMFR4_EL1	3	0	0	7	4
++Res0	63:48
++UnsignedEnum	47:44	SRMASK
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++UnsignedEnum	43:40	TLBID
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++UnsignedEnum	39:36	E3DSE
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++Res0	35:32
++UnsignedEnum	31:28	RMEGDI
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++SignedEnum	27:24	E2H0
++	0b0000	IMP
++	0b1110	NI_NV1
++	0b1111	NI
++EndEnum
++UnsignedEnum	23:20	NV_frac
++	0b0000	NV_NV2
++	0b0001	NV2_ONLY
++	0b0010	NV2P1
++EndEnum
++UnsignedEnum	19:16	FGWTE3
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++UnsignedEnum	15:12	HACDBS
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++UnsignedEnum	11:8	ASID2
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++UnsignedEnum	7:4	EIESB
++	0b0000	NI
++	0b0001	ToEL3
++	0b0010	ToELx
++	0b1111	ANY
++EndEnum
++UnsignedEnum	3:0	PoPS
++	0b0000	NI
++	0b0001	IMP
++EndEnum
++EndSysreg
++
+ Sysreg	SCTLR_EL1	3	0	1	0	0
+ Field	63	TIDCP
+ Field	62	SPINTMASK
+@@ -3522,3 +3575,14 @@ Field	5	F
+ Field	4	P
+ Field	3:0	Align
+ EndSysreg
++
++Sysreg	TLBIDIDR_EL1	3	0	10	4	6
++Res0	63:45
++Field	44:40	NVOS
++Res0	39:37
++Field	36:32	NOS
++Res0	31:13
++Field	12:8	NVIS
++Res0	7:5
++Field	4:0	NIS
++EndSysreg
+diff --git a/drivers/acpi/arm64/Makefile b/drivers/acpi/arm64/Makefile
+index 9497a7777729..2c068491f16e 100644
+--- a/drivers/acpi/arm64/Makefile
++++ b/drivers/acpi/arm64/Makefile
+@@ -5,5 +5,6 @@ obj-$(CONFIG_ACPI_GTDT) 	+= gtdt.o
+ obj-$(CONFIG_ACPI_APMT) 	+= apmt.o
+ obj-$(CONFIG_ARM_AMBA)		+= amba.o
+ obj-$(CONFIG_ACPI_MPAM) 	+= mpam.o
++obj-$(CONFIG_ARM64_TLBID)	+= tlbid.o
+ obj-y				+= dma.o init.o
+ 
+diff --git a/drivers/acpi/arm64/init.c b/drivers/acpi/arm64/init.c
+index d0c8aed90fd1..9dd7b59cc492 100644
+--- a/drivers/acpi/arm64/init.c
++++ b/drivers/acpi/arm64/init.c
+@@ -12,4 +12,6 @@ void __init acpi_arm_init(void)
+ 		acpi_iort_init();
+ 	if (IS_ENABLED(CONFIG_ARM_AMBA))
+ 		acpi_amba_init();
++	if (IS_ENABLED(CONFIG_ARM64_TLBID))
++		acpi_tlbid_init();
+ }
+diff --git a/drivers/acpi/arm64/init.h b/drivers/acpi/arm64/init.h
+index dcc277977194..77921ded1faa 100644
+--- a/drivers/acpi/arm64/init.h
++++ b/drivers/acpi/arm64/init.h
+@@ -5,3 +5,4 @@ void __init acpi_agdi_init(void);
+ void __init acpi_apmt_init(void);
+ void __init acpi_iort_init(void);
+ void __init acpi_amba_init(void);
++void __init acpi_tlbid_init(void);
+diff --git a/drivers/acpi/arm64/tlbid.c b/drivers/acpi/arm64/tlbid.c
+new file mode 100644
+index 000000000000..7790004fce2c
+--- /dev/null
++++ b/drivers/acpi/arm64/tlbid.c
+@@ -0,0 +1,105 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * This file implements handling of
++ * Arm Translation Lookaside Buffer Invalidate Domain table (TLBI)
++ *
++ * Copyright (C) 2026, Huawei Ltd.
++ */
++#define pr_fmt(fmt)	"ACPI: TLBID: " fmt
++
++#include <linux/acpi.h>
++#include <linux/kernel.h>
++#include <linux/list.h>
++#include <linux/slab.h>
++
++#include "init.h"
++
++#include <asm/tlbid.h>
++
++static struct acpi_table_header *acpi_tlbid_table;
++
++/*
++ * tlbid_parse_subtable - Parse ACPI TLBI subtable entry
++ *
++ * Called for each entry in the ACPI TLBI table. Allocates a tlbi_target
++ * structure and copies domain IDs from the ACPI table. Builds the
++ * found_domains bitmap for later domain count calculation.
++ */
++static int __init tlbid_parse_subtable(union acpi_subtable_headers *header,
++				       unsigned long end)
++{
++	struct acpi_tlbi_subtable *hdr = (struct acpi_tlbi_subtable *)header;
++	struct tlbi_target *target;
++
++	if (!hdr)
++		return -EINVAL;
++
++	target = kzalloc(sizeof(*target), GFP_KERNEL);
++	if (!target)
++		return -ENOMEM;
++
++	/* The ACPI Processor UID of the corresponding GICC MADT entry */
++	target->nr_domain = hdr->nr_domain;
++	target->identifier = hdr->identifier;
++	target->domains = kcalloc(hdr->nr_domain, sizeof(*target->domains),
++				  GFP_KERNEL);
++	if (!target->domains) {
++		kfree(target);
++		return -ENOMEM;
++	}
++
++	memcpy(target->domains, (void *)acpi_tlbid_table + hdr->offset,
++	       hdr->nr_domain * sizeof(*target->domains));
++
++	if (add_target(header->tlbi.type, target)) {
++		kfree(target->domains);
++		kfree(target);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++/*
++ * acpi_tlbi_init - Initialize TLBID from ACPI table
++ *
++ * Main entry point for TLBI table parsing. Gets the ACPI TLBI table,
++ * parses Processor and SMMU subtable entries, calculates total domain
++ * count, validates against hardware capability, and calls
++ * tlbid_chip_data_init() to build domain mapping tables.
++ * Outputs appropriate error messages on failure.
++ */
++void __init acpi_tlbid_init(void)
++{
++	enum acpi_tlbi_target_type type;
++	acpi_status status;
++	int ret;
++
++	if (!system_supports_tlbid())
++		return;
++
++	status = acpi_get_table(ACPI_SIG_TLBI, 0, &acpi_tlbid_table);
++	if (ACPI_FAILURE(status))
++		return;
++
++	type = ACPI_TLBI_TYPE_PROCESSOR;
++	while (type != ACPI_TLBI_TYPE_RESERVED) {
++		ret = acpi_table_parse_entries(ACPI_SIG_TLBI,
++					       sizeof(struct acpi_table_tlbi),
++					       type, tlbid_parse_subtable, 0);
++		if (ret <= 0) {
++			pr_err("Failed to get TLBID subtable for %s\n",
++			type == ACPI_TLBI_TYPE_PROCESSOR ? "Processor":"SMMU");
++			break;
++		}
++		type++;
++	}
++
++	if (type != ACPI_TLBI_TYPE_RESERVED)
++		tlbid_data_reset();
++
++	if (parse_tlbid_topology())
++		pr_err("Failed to initialize TLBI Domain data\n");
++
++	acpi_put_table(acpi_tlbid_table);
++}
+diff --git a/drivers/acpi/tables.c b/drivers/acpi/tables.c
+index 4fca04c8dd2d..62d786110ebf 100644
+--- a/drivers/acpi/tables.c
++++ b/drivers/acpi/tables.c
+@@ -42,6 +42,7 @@ enum acpi_subtable_type {
+ 	ACPI_SUBTABLE_HMAT,
+ 	ACPI_SUBTABLE_PRMT,
+ 	ACPI_SUBTABLE_CEDT,
++	ACPI_SUBTABLE_TLBI,
+ };
+ 
+ struct acpi_subtable_entry {
+@@ -287,6 +288,8 @@ acpi_get_entry_type(struct acpi_subtable_entry *entry)
+ 		return 0;
+ 	case ACPI_SUBTABLE_CEDT:
+ 		return entry->hdr->cedt.type;
++	case ACPI_SUBTABLE_TLBI:
++		return entry->hdr->tlbi.type;
+ 	}
+ 	return 0;
+ }
+@@ -303,6 +306,8 @@ acpi_get_entry_length(struct acpi_subtable_entry *entry)
+ 		return entry->hdr->prmt.length;
+ 	case ACPI_SUBTABLE_CEDT:
+ 		return entry->hdr->cedt.length;
++	case ACPI_SUBTABLE_TLBI:
++		return entry->hdr->tlbi.length;
+ 	}
+ 	return 0;
+ }
+@@ -319,6 +324,8 @@ acpi_get_subtable_header_length(struct acpi_subtable_entry *entry)
+ 		return sizeof(entry->hdr->prmt);
+ 	case ACPI_SUBTABLE_CEDT:
+ 		return sizeof(entry->hdr->cedt);
++	case ACPI_SUBTABLE_TLBI:
++		return sizeof(entry->hdr->tlbi);
+ 	}
+ 	return 0;
+ }
+@@ -332,6 +339,8 @@ acpi_get_subtable_type(char *id)
+ 		return ACPI_SUBTABLE_PRMT;
+ 	if (strncmp(id, ACPI_SIG_CEDT, 4) == 0)
+ 		return ACPI_SUBTABLE_CEDT;
++	if (strncmp(id, ACPI_SIG_TLBI, 4) == 0)
++		return ACPI_SUBTABLE_TLBI;
+ 	return ACPI_SUBTABLE_COMMON;
+ }
+ 
+diff --git a/include/acpi/actbl2.h b/include/acpi/actbl2.h
+index 97b05bd334a5..29dda0318c0f 100644
+--- a/include/acpi/actbl2.h
++++ b/include/acpi/actbl2.h
+@@ -26,6 +26,7 @@
+  */
+ #define ACPI_SIG_AGDI           "AGDI"	/* Arm Generic Diagnostic Dump and Reset Device Interface */
+ #define ACPI_SIG_APMT           "APMT"	/* Arm Performance Monitoring Unit table */
++#define ACPI_SIG_TLBI           "TLBI"	/* Translation Lookaside Buffer Invalidate Domain Table */
+ #define ACPI_SIG_BDAT           "BDAT"	/* BIOS Data ACPI Table */
+ #define ACPI_SIG_CCEL           "CCEL"	/* CC Event Log Table */
+ #define ACPI_SIG_CDAT           "CDAT"	/* Coherent Device Attribute Table */
+@@ -341,6 +342,34 @@ enum acpi_apmt_node_type {
+ 
+ #define ACPI_APMT_OVFLW_IRQ_FLAGS_TYPE_WIRED    (0<<1)
+ 
++/*******************************************************************************
++ * TLBI - Arm Translation Lookaside Buffer Invalidation Domain Table (TLBI)
++ *
++ ******************************************************************************/
++struct acpi_table_tlbi {
++	struct acpi_table_header header;	/* Common ACPI table header */
++	u32 nr_subtable;
++};
++
++struct acpi_tlbi_header {
++	u16 type;
++	u16 reserved;
++	u32 length;
++};
++
++struct acpi_tlbi_subtable {
++	struct acpi_tlbi_header header;
++	u32 identifier;
++	u32 nr_domain;
++	u32 offset;
++};
++
++enum acpi_tlbi_target_type {
++	ACPI_TLBI_TYPE_PROCESSOR = 1,
++	ACPI_TLBI_TYPE_SMMU,
++	ACPI_TLBI_TYPE_RESERVED,
++};
++
+ /*******************************************************************************
+  *
+  * BDAT - BIOS Data ACPI Table
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index e59a74273e6e..acd1a9241829 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -127,6 +127,7 @@ union acpi_subtable_headers {
+ 	struct acpi_hmat_structure hmat;
+ 	struct acpi_prmt_module_header prmt;
+ 	struct acpi_cedt_header cedt;
++	struct acpi_tlbi_header tlbi;
+ };
+ 
+ typedef int (*acpi_tbl_table_handler)(struct acpi_table_header *table);

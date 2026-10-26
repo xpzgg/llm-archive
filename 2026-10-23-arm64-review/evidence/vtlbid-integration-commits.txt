@@ -1,0 +1,8 @@
+49c8c189ed2068016d36bd9de710448b035eb326 KVM: arm64: Introduce TLBID virtualization infrastructure
+67197ff4b35dd750cc3e71b5bd9260088f14136c KVM: arm64: Add VTLBID sysregs and update VTLBID(n) on vCPU load
+cda8a1753d10e9f380ce5d04cfe741329ab76656 KVM: arm64: Wire up TLBID vDomain configuration ioctls
+0c7fe020dfa6e7f1b563f57f1320ee37b058fa0a KVM: arm64: Ensure DVMBM is disabled when TLBID is enabled
+748b3568494a2989410e7a0ea6d2ec8082898149 KVM: arm64: Emulate TLBIDIDR_EL1 with virtual domain counts
+cd82a951d64a6e34c01fef0cdd2e5ed173b729e2 KVM: arm64: Conditionally expose ID_AA64MMFR4_EL1.TLBID to guest
+b3cd89c851cf69e2813d0e672333014cdb521ad2 KVM: arm64: Enable TLBIDIDR_EL1 access trap in guest
+c22f568295614414aefbb509385c23090b96bd71 KVM: arm64: Add tracepoints for TLBID vDomain load events
