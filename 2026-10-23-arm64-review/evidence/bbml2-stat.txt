@@ -1,0 +1,23 @@
+ arch/arm64/include/asm/cpufeature.h   |  32 +++
+ arch/arm64/include/asm/kfence.h       |   3 +-
+ arch/arm64/include/asm/mmu.h          |   5 +
+ arch/arm64/include/asm/pgtable-prot.h |  10 +-
+ arch/arm64/include/asm/pgtable.h      |  35 ++-
+ arch/arm64/kernel/cpufeature.c        | 161 +++++++++---
+ arch/arm64/mm/contpte.c               | 134 +++++++++-
+ arch/arm64/mm/init.c                  |   6 +-
+ arch/arm64/mm/mmu.c                   | 474 +++++++++++++++++++++++++++++++++-
+ arch/arm64/mm/pageattr.c              | 166 ++++++++----
+ arch/arm64/mm/pfn_range_alloc.c       |   6 +-
+ arch/arm64/mm/proc.S                  |  27 +-
+ arch/arm64/mm/trans_pgd.c             |  40 +--
+ arch/arm64/tools/cpucaps              |   2 +-
+ arch/arm64/tools/sysreg               |   1 +
+ arch/openrisc/kernel/dma.c            |   4 +-
+ arch/riscv/mm/pageattr.c              |   8 +-
+ arch/sw_64/mm/pageattr.c              |   2 +-
+ include/linux/pagewalk.h              |  10 +-
+ mm/internal.h                         |   5 +
+ mm/pagewalk.c                         |  82 +++++-
+ mm/ptdump.c                           |   3 +-
+ 22 files changed, 1047 insertions(+), 169 deletions(-)

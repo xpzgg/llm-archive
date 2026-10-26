@@ -1,0 +1,2370 @@
+diff --git a/arch/arm64/include/asm/mpam.h b/arch/arm64/include/asm/mpam.h
+index 5f1ac30ea470..4d0a66013e3f 100644
+--- a/arch/arm64/include/asm/mpam.h
++++ b/arch/arm64/include/asm/mpam.h
+@@ -129,18 +129,13 @@ static inline u64 mpam_get_regval(struct task_struct *tsk)
+ #endif
+ }
+ 
+-static inline void resctrl_arch_set_rmid(struct task_struct *tsk, u32 rmid)
+-{
+-#ifdef CONFIG_ARM64_MPAM
+-	u64 regval = mpam_get_regval(tsk);
++u32 req2intpartid(u32 reqpartid);
+ 
+-	regval &= ~MPAM_SYSREG_PMG_D;
+-	regval &= ~MPAM_SYSREG_PMG_I;
+-	regval |= FIELD_PREP(MPAM_SYSREG_PMG_D, rmid);
+-	regval |= FIELD_PREP(MPAM_SYSREG_PMG_I, rmid);
++static inline u32 mpam_get_regval_partid(u64 regval)
++{
++	u32 reqpartid = (regval & MPAM_SYSREG_PARTID_D) >> 16;
+ 
+-	WRITE_ONCE(task_thread_info(tsk)->mpam_partid_pmg, regval);
+-#endif
++	return req2intpartid(reqpartid);
+ }
+ 
+ static inline void mpam_thread_switch(struct task_struct *tsk)
+@@ -153,7 +148,7 @@ static inline void mpam_thread_switch(struct task_struct *tsk)
+ 	    !static_branch_likely(&mpam_enabled))
+ 		return;
+ 
+-	if (!regval)
++	if (!regval || !mpam_get_regval_partid(regval))
+ 		regval = READ_ONCE(per_cpu(arm64_mpam_default, cpu));
+ 
+ 	oldregval = READ_ONCE(per_cpu(arm64_mpam_current, cpu));
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index fa2bb54a49e4..f63fab2a8d11 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -4155,6 +4155,9 @@ static int arm_smmu_group_set_mpam(struct iommu_group *group, u16 partid,
+ 			sid = master->streams[i].id;
+ 			step = arm_smmu_get_step_for_sid(smmu, sid);
+ 
++			pr_debug("smmu feat 0x%x bind partid %d pmg %d to sid %d\n",
++				  smmu->features, partid, pmg, sid);
++
+ 			/* These need locking if the VMSPtr is ever used */
+ 			step->data[4] = FIELD_PREP(STRTAB_STE_4_PARTID, partid);
+ 			step->data[5] = FIELD_PREP(STRTAB_STE_5_PMG, pmg);
+diff --git a/drivers/platform/mpam/mpam_devices.c b/drivers/platform/mpam/mpam_devices.c
+index 6c1c82f79ec0..e78352e2dcb2 100644
+--- a/drivers/platform/mpam/mpam_devices.c
++++ b/drivers/platform/mpam/mpam_devices.c
+@@ -56,6 +56,7 @@ static DEFINE_MUTEX(mpam_cpuhp_state_lock);
+  * Generating traffic outside this range will result in screaming interrupts.
+  */
+ u16 mpam_partid_max;
++u16 mpam_intpartid_max;
+ u8 mpam_pmg_max;
+ static bool partid_max_init, partid_max_published;
+ static DEFINE_SPINLOCK(partid_max_lock);
+@@ -96,6 +97,17 @@ static const struct midr_range hip12_cpus[] = {
+ 	{ /* sentinel */ }
+ };
+ 
++static const struct midr_range hip13_cpus[] = {
++	MIDR_ALL_VERSIONS(MIDR_HISI_HIP13),
++	{ /* sentinel */ }
++};
++
++static const struct midr_range hisi_cpus[] = {
++	MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
++	MIDR_ALL_VERSIONS(MIDR_HISI_HIP13),
++	{ /* sentinel */ }
++};
++
+ static u32 __mpam_read_reg(struct mpam_msc *msc, u16 reg)
+ {
+ 	WARN_ON_ONCE(reg + sizeof(u32) > msc->mapped_hwpage_sz);
+@@ -183,15 +195,27 @@ static u64 mpam_msc_read_esr(struct mpam_msc *msc)
+ 	return (esr_high << 32) | esr_low;
+ }
+ 
++static void __mpam_part_sel_raw(u32 partsel, struct mpam_msc *msc)
++{
++	lockdep_assert_held(&msc->part_sel_lock);
++	mpam_write_partsel_reg(msc, PART_SEL, partsel);
++}
++
+ static void __mpam_part_sel(u8 ris_idx, u16 partid, struct mpam_msc *msc)
+ {
+-	u32 partsel;
++	u32 partsel = FIELD_PREP(MPAMCFG_PART_SEL_RIS, ris_idx) |
++		      FIELD_PREP(MPAMCFG_PART_SEL_PARTID_SEL, partid);
+ 
+-	lockdep_assert_held(&msc->part_sel_lock);
++	__mpam_part_sel_raw(partsel, msc);
++}
+ 
+-	partsel = FIELD_PREP(MPAMCFG_PART_SEL_RIS, ris_idx) |
+-		  FIELD_PREP(MPAMCFG_PART_SEL_PARTID_SEL, partid);
+-	mpam_write_partsel_reg(msc, PART_SEL, partsel);
++static void __mpam_intpart_sel(u8 ris_idx, u16 intpartid, struct mpam_msc *msc)
++{
++	u32 partsel = FIELD_PREP(MPAMCFG_PART_SEL_RIS, ris_idx) |
++		      FIELD_PREP(MPAMCFG_PART_SEL_PARTID_SEL, intpartid) |
++		      MPAMCFG_PART_SEL_INTERNAL;
++
++	__mpam_part_sel_raw(partsel, msc);
+ }
+ 
+ int mpam_register_requestor(u16 partid_max, u8 pmg_max)
+@@ -201,10 +225,16 @@ int mpam_register_requestor(u16 partid_max, u8 pmg_max)
+ 	spin_lock(&partid_max_lock);
+ 	if (!partid_max_init) {
+ 		mpam_partid_max = partid_max;
++		/*
++		 * Update mpam_intpartid_max here, in case the
++		 * system doesn't have narrow-partid feature.
++		 */
++		mpam_intpartid_max = partid_max;
+ 		mpam_pmg_max = pmg_max;
+ 		partid_max_init = true;
+ 	} else if (!partid_max_published) {
+ 		mpam_partid_max = min(mpam_partid_max, partid_max);
++		mpam_intpartid_max = min(mpam_intpartid_max, partid_max);
+ 		mpam_pmg_max = min(mpam_pmg_max, pmg_max);
+ 	} else {
+ 		/* New requestors can't lower the values */
+@@ -364,6 +394,11 @@ static void mpam_msc_destroy(struct mpam_msc *msc)
+ 
+ 	list_for_each_entry_safe(ris, tmp, &msc->ris, msc_list)
+ 		mpam_ris_destroy(ris);
++
++	debugfs_remove_recursive(msc->debugfs);
++	msc->debugfs = NULL;
++
++	free_percpu(msc->error_dev_id);
+ }
+ 
+ /*
+@@ -595,6 +630,7 @@ u16 mpam_cpbm_wd_hisi_workaround(u16 cpbm_wd, enum mpam_device_features feat,
+ 	return cpbm_wd;
+ }
+ 
++static struct dentry *mpam_debugfs;
+ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ {
+ 	int err;
+@@ -607,25 +643,25 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 
+ 	/* Cache Capacity Partitioning */
+ 	if (FIELD_GET(MPAMF_IDR_HAS_CCAP_PART, ris->idr)) {
+-		u32 ccap_features = mpam_read_partsel_reg(msc, CCAP_IDR);
++		ris->ccap_idr = mpam_read_partsel_reg(msc, CCAP_IDR);
+ 
+-		props->cmax_wd = FIELD_GET(MPAMF_CCAP_IDR_CMAX_WD, ccap_features);
++		props->cmax_wd = FIELD_GET(MPAMF_CCAP_IDR_CMAX_WD, ris->ccap_idr);
+ 
+ 		if (props->cmax_wd) {
+-			if (!FIELD_GET(MPAMF_CCAP_IDR_NO_CMAX, ccap_features))
++			if (!FIELD_GET(MPAMF_CCAP_IDR_NO_CMAX, ris->ccap_idr))
+ 				mpam_set_feature(mpam_feat_ccap_part, props);
+ 
+-			if (FIELD_GET(MPAMF_CCAP_IDR_HAS_CMIN, ccap_features))
++			if (FIELD_GET(MPAMF_CCAP_IDR_HAS_CMIN, ris->ccap_idr))
+ 				mpam_set_feature(mpam_feat_cmin, props);
+ 		}
+ 	}
+ 
+ 	/* Cache Portion partitioning */
+ 	if (FIELD_GET(MPAMF_IDR_HAS_CPOR_PART, ris->idr)) {
+-		u32 cpor_features = mpam_read_partsel_reg(msc, CPOR_IDR);
++		ris->cpor_idr = mpam_read_partsel_reg(msc, CPOR_IDR);
+ 
+ 		props->cpbm_wd = mpam_cpbm_wd_hisi_workaround(
+-				 FIELD_GET(MPAMF_CPOR_IDR_CPBM_WD, cpor_features),
++				 FIELD_GET(MPAMF_CPOR_IDR_CPBM_WD, ris->cpor_idr),
+ 				 mpam_feat_cpor_part, class->level);
+ 		if (props->cpbm_wd)
+ 			mpam_set_feature(mpam_feat_cpor_part, props);
+@@ -726,6 +762,14 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 				else
+ 					mpam_set_feature(mpam_feat_msmon_mbwu_44counter, props);
+ 			}
++
++			if (!has_long) {
++				props->mbwu_scale = FIELD_GET(MPAMF_MBWUMON_IDR_SCALE, mbwumonidr);
++				if (props->mbwu_scale)
++					mpam_set_feature(mpam_feat_msmon_mbwu_scale, props);
++			} else {
++				props->mbwu_scale = 0;
++			}
+ 		}
+ 	}
+ 
+@@ -741,13 +785,15 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 		u16 partid_max = FIELD_GET(MPAMF_PARTID_NRW_IDR_INTPARTID_MAX, nrwidr);
+ 
+ 		mpam_set_feature(mpam_feat_partid_nrw, props);
+-		msc->partid_max = min(msc->partid_max, partid_max);
++		msc->intpartid_max = min(msc->partid_max, partid_max);
++	} else {
++		msc->intpartid_max = msc->partid_max;
+ 	}
+ }
+ 
+ static int mpam_pmg_max_workaround(u64 idr)
+ {
+-	if (is_midr_in_range_list(hip12_cpus))
++	if (is_midr_in_range_list(hisi_cpus))
+ 		return 0;
+ 
+ 	return FIELD_GET(MPAMF_IDR_PMG_MAX, idr);
+@@ -806,6 +852,7 @@ static int mpam_msc_hw_probe(struct mpam_msc *msc)
+ 
+ 	spin_lock(&partid_max_lock);
+ 	mpam_partid_max = min(mpam_partid_max, msc->partid_max);
++	mpam_intpartid_max = min(mpam_intpartid_max, msc->intpartid_max);
+ 	mpam_pmg_max = min(mpam_pmg_max, msc->pmg_max);
+ 	spin_unlock(&partid_max_lock);
+ 
+@@ -887,6 +934,9 @@ static void gen_msmon_ctl_flt_vals(struct mon_read *m, u32 *ctl_val,
+ 	 */
+ 	*ctl_val |= MSMON_CFG_x_CTL_MATCH_PARTID;
+ 
++	if (mpam_has_feature(mpam_feat_msmon_mbwu_scale, &m->ris->props))
++		*ctl_val |= MSMON_CFG_x_CTL_SCLEN;
++
+ 	*flt_val = FIELD_PREP(MSMON_CFG_MBWU_FLT_PARTID, ctx->partid);
+ 	*flt_val |= FIELD_PREP(MSMON_CFG_MBWU_FLT_RWBW, ctx->opts);
+ 	if (m->ctx->match_pmg) {
+@@ -924,7 +974,7 @@ static bool mpam_csu_hisi_need_retrigger(struct mpam_msc_ris *ris,
+ 	    ris->comp->class->level != 3)
+ 		return false;
+ 
+-	if (!is_midr_in_range_list(hip12_cpus))
++	if (!is_midr_in_range_list(hisi_cpus))
+ 		return false;
+ 
+ 	if (read_again)
+@@ -973,12 +1023,18 @@ static u64 mpam_msmon_overflow_val(struct mpam_msc_ris *ris)
+ 	else if (mpam_has_feature(mpam_feat_msmon_mbwu_44counter, &ris->props))
+ 		return GENMASK_ULL(43, 0);
+ 	else
+-		return GENMASK_ULL(30, 0);
++		/* Only non-long MBWU counter enables scale */
++		return GENMASK_ULL(30, 0) << ris->props.mbwu_scale;
+ }
+ 
+ bool resctrl_arch_would_mbm_overflow(void)
+ {
+-	return read_cpuid_implementor() != ARM_CPU_IMP_HISI;
++	/* Non-HiSilicon CPUs and HIP13 need overflow handling */
++	if (read_cpuid_implementor() != ARM_CPU_IMP_HISI)
++		return true;
++
++	/* HIP13 is the exception among HiSilicon CPUs */
++	return is_midr_in_range_list(hip13_cpus);
+ }
+ 
+ static bool mpam_ris_has_nrdy_bit(struct mpam_msc_ris *ris)
+@@ -991,7 +1047,7 @@ static bool mpam_ris_has_nrdy_bit(struct mpam_msc_ris *ris)
+ 
+ static u64 mpam_csu_hisi_need_halved(struct mpam_msc_ris *ris, u64 now)
+ {
+-	if (!is_midr_in_range_list(hip12_cpus))
++	if (!is_midr_in_range_list(hisi_cpus))
+ 		return now;
+ 
+ 	if (ris->comp->class->type != MPAM_CLASS_CACHE ||
+@@ -1001,6 +1057,16 @@ static u64 mpam_csu_hisi_need_halved(struct mpam_msc_ris *ris, u64 now)
+ 	return now >> 1;
+ }
+ 
++u32 mpam_min_cbm_bits(enum resctrl_res_level rid)
++{
++	if (rid == RDT_RESOURCE_L2) {
++		if (is_midr_in_range_list(hip13_cpus))
++			return 0;
++	}
++
++	return 1;
++}
++
+ static bool read_msmon_mbwu_is_overflow(struct mpam_msc *msc)
+ {
+ 	u32 ctl;
+@@ -1022,7 +1088,7 @@ static void __ris_msmon_read(void *arg)
+ 	unsigned long flags;
+ 	bool config_mismatch;
+ 	struct mon_read *m = arg;
+-	u64 now, overflow_val = 0;
++	u64 now;
+ 	bool mbwu_overflow = false;
+ 	struct mon_cfg *ctx = m->ctx;
+ 	bool reset_on_next_read = false;
+@@ -1046,6 +1112,9 @@ static void __ris_msmon_read(void *arg)
+ 		if (mbwu_state) {
+ 			reset_on_next_read = mbwu_state->reset_on_next_read;
+ 			mbwu_state->reset_on_next_read = false;
++
++			mbwu_state->cfg.partid = ctx->partid;
++			mbwu_state->cfg.pmg = ctx->pmg;
+ 		}
+ 
+ 		mbwu_overflow = read_msmon_mbwu_is_overflow(msc);
+@@ -1098,6 +1167,7 @@ static void __ris_msmon_read(void *arg)
+ 			now = mpam_read_monsel_reg(msc, MBWU);
+ 			nrdy = now & MSMON___NRDY;
+ 			now = FIELD_GET(MSMON___VALUE, now);
++			now <<= ris->props.mbwu_scale;
+ 		}
+ 
+ 		if (config_mismatch && !mpam_ris_has_nrdy_bit(ris))
+@@ -1123,9 +1193,7 @@ static void __ris_msmon_read(void *arg)
+ 
+ 		/* Add any pre-overflow value to the mbwu_state->val */
+ 		if (mbwu_overflow)
+-			overflow_val = mpam_msmon_overflow_val(ris);
+-
+-		mbwu_state->correction += overflow_val;
++			mbwu_state->correction += mpam_msmon_overflow_val(ris);
+ 
+ 		/* Include bandwidth consumed before the last hardware reset */
+ 		now += mbwu_state->correction;
+@@ -1349,14 +1417,26 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	u16 cmax = MPAMCFG_CMAX_CMAX;
+ 	struct mpam_msc *msc = ris->msc;
+ 	u16 bwa_fract = MPAMCFG_MBW_MAX_MAX;
++	u16 intpartid = req2intpartid(partid);
+ 	struct mpam_props *rprops = &ris->props;
+ 
+ 	spin_lock(&msc->part_sel_lock);
+ 	__mpam_part_sel(ris->ris_idx, partid, msc);
+ 
+-	if(mpam_has_feature(mpam_feat_partid_nrw, rprops))
++	if (mpam_has_feature(mpam_feat_partid_nrw, rprops)) {
+ 		mpam_write_partsel_reg(msc, INTPARTID,
+-				      (MPAMCFG_PART_SEL_INTERNAL | partid));
++				       MPAMCFG_INTPARTID_INTERNAL |
++				       intpartid);
++
++		/*
++		 * Mapping from reqpartid to intpartid already established.
++		 * Sub-monitoring groups share the parent's configuration.
++		 */
++		if (partid != intpartid)
++			goto out;
++
++		__mpam_intpart_sel(ris->ris_idx, intpartid, msc);
++	}
+ 
+ 	if (mpam_has_feature(mpam_feat_cpor_part, rprops)) {
+ 		if (mpam_has_feature(mpam_feat_cpor_part, cfg))
+@@ -1439,6 +1519,7 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	    mpam_has_feature(mpam_feat_dspri_part, rprops))
+ 		mpam_write_partsel_reg(msc, PRI, pri_val);
+ 
++out:
+ 	spin_unlock(&msc->part_sel_lock);
+ }
+ 
+@@ -1756,6 +1837,7 @@ static int __setup_ppi(struct mpam_msc *msc)
+ 			pr_err_once("%s shares PPI with %s!\n",
+ 				    dev_name(&msc->pdev->dev),
+ 				    dev_name(&empty->pdev->dev));
++			free_percpu(msc->error_dev_id);
+ 			return -EBUSY;
+ 		}
+ 		*per_cpu_ptr(msc->error_dev_id, cpu) = msc;
+@@ -1917,6 +1999,7 @@ static int mpam_msc_drv_probe(struct platform_device *pdev)
+ {
+ 	int err;
+ 	pgprot_t prot;
++	char name[20];
+ 	void * __iomem io;
+ 	struct mpam_msc *msc;
+ 	struct resource *msc_res;
+@@ -2015,6 +2098,11 @@ static int mpam_msc_drv_probe(struct platform_device *pdev)
+ 
+ 		list_add_rcu(&msc->glbl_list, &mpam_all_msc);
+ 		platform_set_drvdata(pdev, msc);
++
++		snprintf(name, sizeof(name), "msc.%u", msc->id);
++		msc->debugfs = debugfs_create_dir(name, mpam_debugfs);
++		debugfs_create_x32("max_nrdy_usec", 0400, msc->debugfs, &msc->nrdy_usec);
++
+ 	} while (0);
+ 	mutex_unlock(&mpam_list_lock);
+ 
+@@ -2307,6 +2395,7 @@ static void __destroy_component_cfg(struct mpam_component *comp)
+ 	struct msmon_mbwu_state *mbwu_state;
+ 
+ 	kfree(comp->cfg);
++	comp->cfg = NULL;
+ 	list_for_each_entry(ris, &comp->ris, comp_list) {
+ 		mutex_lock(&ris->msc->lock);
+ 		spin_lock_irqsave(&ris->msc->mon_sel_lock, flags);
+@@ -2373,6 +2462,97 @@ static int mpam_allocate_config(void)
+ 	return 0;
+ }
+ 
++static void mpam_debugfs_setup_ris(struct mpam_msc_ris *ris)
++{
++	char name[40];
++	struct dentry *d;
++	struct mpam_props *rprops = &ris->props;
++
++	snprintf(name, sizeof(name), "ris.%u", ris->ris_idx);
++	d = debugfs_create_dir(name, ris->msc->debugfs);
++	debugfs_create_x64("mpamf_idr", 0400, d, &ris->idr);
++	debugfs_create_x32("mpamf_cpor_idr", 0400, d, &ris->cpor_idr);
++	debugfs_create_x32("mpamf_ccap_idr", 0400, d, &ris->ccap_idr);
++	debugfs_create_x32("features", 0400, d, &rprops->features);
++	debugfs_create_x16("cpbm_wd", 0400, d, &rprops->cpbm_wd);
++	debugfs_create_x16("cmax_wd", 0400, d, &rprops->cmax_wd);
++	debugfs_create_x16("mbw_pbm_bits", 0400, d, &rprops->mbw_pbm_bits);
++	debugfs_create_x16("intpri_wd", 0400, d, &rprops->intpri_wd);
++	debugfs_create_x8("bwa_wd", 0400, d, &rprops->bwa_wd);
++	debugfs_create_x8("mbwu_scale", 0400, d, &rprops->mbwu_scale);
++	debugfs_create_x16("num_csu_mon", 0400, d, &rprops->num_csu_mon);
++	debugfs_create_x16("num_mbwu_mon", 0400, d, &rprops->num_mbwu_mon);
++	debugfs_create_cpumask("affinity", 0400, d, &ris->affinity);
++	ris->debugfs = d;
++}
++
++static void mpam_debugfs_setup_comp_ris(struct mpam_component *comp,
++					struct mpam_msc_ris *ris)
++{
++	char name[40];
++	char path[40];
++	u8 ris_idx = ris->ris_idx;
++	int msc_id = ris->msc->id;
++	struct dentry *d = comp->debugfs;
++
++	snprintf(name, sizeof(name), "msc.%u_ris.%u",
++			msc_id,	ris_idx);
++	snprintf(path, sizeof(path), "../../msc.%u/ris.%u",
++			msc_id, ris_idx);
++	debugfs_create_symlink(name, d, path);
++}
++
++static void mpam_debugfs_setup_comp(struct mpam_class *class,
++				    struct mpam_component *comp)
++{
++	char name[40];
++	struct dentry *d;
++	struct mpam_msc_ris *ris;
++
++	snprintf(name, sizeof(name), "comp.%u", comp->comp_id);
++	d = debugfs_create_dir(name, class->debugfs);
++	comp->debugfs = d;
++
++	list_for_each_entry_rcu(ris, &comp->ris, comp_list)
++		mpam_debugfs_setup_comp_ris(comp, ris);
++}
++
++static void mpam_debugfs_setup(void)
++{
++	char name[40];
++	struct dentry *d;
++	struct mpam_msc *msc;
++	struct mpam_class *class;
++	struct mpam_msc_ris *ris;
++	struct mpam_component *comp;
++
++	lockdep_assert_held(&mpam_list_lock);
++
++	list_for_each_entry(msc, &mpam_all_msc, glbl_list) {
++		d = msc->debugfs;
++		debugfs_create_x32("fw_id", 0400, d, &msc->pdev->id);
++		debugfs_create_x32("iface", 0400, d, &msc->iface);
++		debugfs_create_u16("partid_max", 0400, d, &msc->partid_max);
++		debugfs_create_u16("intpartid_max", 0400, d, &msc->intpartid_max);
++		debugfs_create_u8("pmg_max", 0400, d, &msc->pmg_max);
++		list_for_each_entry(ris, &msc->ris, msc_list)
++			mpam_debugfs_setup_ris(ris);
++	}
++
++	list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
++		snprintf(name, sizeof(name), "class.%u", class->level);
++		d = debugfs_create_dir(name, mpam_debugfs);
++		debugfs_create_x32("features", 0400, d, &class->props.features);
++		debugfs_create_x32("nrdy_usec", 0400, d, &class->nrdy_usec);
++		debugfs_create_x8("level", 0400, d, &class->level);
++		debugfs_create_cpumask("affinity", 0400, d, &class->affinity);
++		class->debugfs = d;
++
++		list_for_each_entry_rcu(comp, &class->components, class_list)
++			mpam_debugfs_setup_comp(class, comp);
++	}
++}
++
+ static void mpam_enable_once(void)
+ {
+ 	int err;
+@@ -2398,6 +2578,8 @@ static void mpam_enable_once(void)
+ 			pr_warn("Failed to register irqs: %d\n", err);
+ 			break;
+ 		}
++
++		mpam_debugfs_setup();
+ 	} while (0);
+ 	mutex_unlock(&mpam_list_lock);
+ 	cpus_read_unlock();
+@@ -2531,8 +2713,8 @@ static int mpam_msc_drv_remove(struct platform_device *pdev)
+ 	mpam_num_msc--;
+ 	platform_set_drvdata(pdev, NULL);
+ 	list_del_rcu(&msc->glbl_list);
+-	mpam_msc_destroy(msc);
+ 	synchronize_srcu(&mpam_srcu);
++	mpam_msc_destroy(msc);
+ 	mutex_unlock(&mpam_list_lock);
+ 
+ 	return 0;
+@@ -2542,13 +2724,37 @@ struct mpam_write_config_arg {
+ 	struct mpam_msc_ris *ris;
+ 	struct mpam_component *comp;
+ 	u16 partid;
++	bool sync;
+ };
+ 
+ static int __write_config(void *arg)
+ {
++	int closid_num = resctrl_arch_get_num_closid(NULL);
+ 	struct mpam_write_config_arg *c = arg;
++	u32 reqpartid;
++
++	if (c->sync) {
++		/* c->partid should be within the range of reqPARTIDs */
++		WARN_ON_ONCE(c->partid < closid_num);
++
++		mpam_reprogram_ris_partid(c->ris, c->partid,
++					 &c->comp->cfg[req2intpartid(c->partid)]);
++		return 0;
++	}
++
++	/* c->partid should be within the range of intPARTIDs */
++	WARN_ON_ONCE(c->partid >= closid_num);
+ 
+-	mpam_reprogram_ris_partid(c->ris, c->partid, &c->comp->cfg[c->partid]);
++	mpam_reprogram_ris_partid(c->ris, c->partid,
++				 &c->comp->cfg[c->partid]);
++
++	/* Synchronize the configuration to each sub-monitoring group. */
++	for (reqpartid = closid_num;
++	     reqpartid < get_num_reqpartid(); reqpartid++) {
++		if (req2intpartid(reqpartid) == c->partid)
++			mpam_reprogram_ris_partid(c->ris, reqpartid,
++						 &c->comp->cfg[c->partid]);
++	}
+ 
+ 	return 0;
+ }
+@@ -2556,7 +2762,7 @@ static int __write_config(void *arg)
+ /* TODO: split into write_config/sync_config */
+ /* TODO: add config_dirty bitmap to drive sync_config */
+ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+-		      struct mpam_config *cfg)
++		      struct mpam_config *cfg, bool sync)
+ {
+ 	struct mpam_write_config_arg arg;
+ 	struct mpam_msc_ris *ris;
+@@ -2564,12 +2770,19 @@ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+ 
+ 	lockdep_assert_cpus_held();
+ 
+-	if (!memcmp(&comp->cfg[partid], cfg, sizeof(*cfg)))
+-		return 0;
++	if (!sync) {
++		/* The partid is within the range of intPARTIDs */
++		WARN_ON_ONCE(partid >= resctrl_arch_get_num_closid(NULL));
++
++		if (!memcmp(&comp->cfg[partid], cfg, sizeof(*cfg)))
++			return 0;
++
++		comp->cfg[partid] = *cfg;
++	}
+ 
+-	comp->cfg[partid] = *cfg;
+ 	arg.comp = comp;
+ 	arg.partid = partid;
++	arg.sync = sync;
+ 
+ 	idx = srcu_read_lock(&mpam_srcu);
+ 	list_for_each_entry_rcu(ris, &comp->ris, comp_list) {
+@@ -2651,6 +2864,8 @@ static int __init mpam_msc_driver_init(void)
+ 	if (acpi_disabled)
+ 		mpam_dt_create_foundling_msc();
+ 
++	mpam_debugfs = debugfs_create_dir("mpam", NULL);
++
+ 	return platform_driver_register(&mpam_msc_driver);
+ }
+ /* Must occur after arm64_mpam_register_cpus() from arch_initcall() */
+diff --git a/drivers/platform/mpam/mpam_internal.h b/drivers/platform/mpam/mpam_internal.h
+index 5f60e0cc4eeb..c7087ca35e20 100644
+--- a/drivers/platform/mpam/mpam_internal.h
++++ b/drivers/platform/mpam/mpam_internal.h
+@@ -7,6 +7,7 @@
+ #include <linux/arm_mpam.h>
+ #include <linux/atomic.h>
+ #include <linux/cpumask.h>
++#include <linux/debugfs.h>
+ #include <linux/io.h>
+ #include <linux/jump_label.h>
+ #include <linux/mailbox_client.h>
+@@ -58,6 +59,7 @@ struct mpam_msc
+ 	bool			error_irq_requested;
+ 	bool			error_irq_hw_enabled;
+ 	u16			partid_max;
++	u16			intpartid_max;
+ 	u8			pmg_max;
+ 	unsigned long		ris_idxs[128 / BITS_PER_LONG];
+ 	u32			ris_max;
+@@ -74,6 +76,8 @@ struct mpam_msc
+ 	spinlock_t		mon_sel_lock;
+ 	void __iomem *		mapped_hwpage;
+ 	size_t			mapped_hwpage_sz;
++
++	struct dentry		*debugfs;
+ };
+ 
+ /*
+@@ -109,6 +113,7 @@ enum mpam_device_features {
+ 	mpam_feat_msmon_mbwu_63counter,
+ 	mpam_feat_msmon_mbwu_capture,
+ 	mpam_feat_msmon_mbwu_rwbw,
++	mpam_feat_msmon_mbwu_scale,
+ 	mpam_feat_msmon_capt,
+ 	mpam_feat_partid_nrw,
+ 	MPAM_FEATURE_LAST,
+@@ -127,6 +132,7 @@ struct mpam_props
+ 	u16			dspri_wd;
+ 	u16			num_csu_mon;
+ 	u16			num_mbwu_mon;
++	u8			mbwu_scale;
+ };
+ 
+ #define mpam_has_feature(_feat, x)	((1<<_feat) & (x)->features)
+@@ -155,6 +161,8 @@ struct mpam_class
+ 
+ 	struct ida		ida_csu_mon;
+ 	struct ida		ida_mbwu_mon;
++
++	struct dentry		*debugfs;
+ };
+ 
+ struct mpam_config {
+@@ -197,6 +205,8 @@ struct mpam_component
+ 
+ 	/* parent: */
+ 	struct mpam_class	*class;
++
++	struct dentry		*debugfs;
+ };
+ 
+ /* The values for MSMON_CFG_MBWU_FLT.RWBW */
+@@ -234,6 +244,8 @@ struct msmon_mbwu_state {
+ struct mpam_msc_ris {
+ 	u8			ris_idx;
+ 	u64			idr;
++	u32			cpor_idr;
++	u32			ccap_idr;
+ 	struct mpam_props	props;
+ 	bool			in_reset_state;
+ 
+@@ -251,6 +263,8 @@ struct mpam_msc_ris {
+ 
+ 	/* msmon mbwu configuration is preserved over reset */
+ 	struct msmon_mbwu_state	*mbwu_state;
++
++	struct dentry		*debugfs;
+ };
+ 
+ struct mpam_resctrl_dom {
+@@ -303,6 +317,7 @@ extern struct srcu_struct mpam_srcu;
+ 
+ /* System wide partid/pmg values */
+ extern u16 mpam_partid_max;
++extern u16 mpam_intpartid_max;
+ extern u8 mpam_pmg_max;
+ 
+ /* Scheduled work callback to enable mpam once all MSC have been probed */
+@@ -312,7 +327,7 @@ void mpam_disable(struct work_struct *work);
+ void mpam_reset_class(struct mpam_class *class);
+ 
+ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+-		      struct mpam_config *cfg);
++		      struct mpam_config *cfg, bool sync);
+ 
+ int mpam_msmon_read(struct mpam_component *comp, struct mon_cfg *ctx,
+ 		    enum mpam_device_features, u64 *val);
+@@ -327,6 +342,7 @@ void mpam_resctrl_exit(void);
+ 
+ u16 mpam_cpbm_wd_hisi_workaround(u16 cpbm_wd, enum mpam_device_features feat, u8 cache_level);
+ bool mpam_cpbm_hisi_check_invalid(struct rdt_resource *r, unsigned long val);
++u32 mpam_min_cbm_bits(enum resctrl_res_level rid);
+ 
+ /*
+  * MPAM MSCs have the following register layout. See:
+@@ -432,6 +448,7 @@ bool mpam_cpbm_hisi_check_invalid(struct rdt_resource *r, unsigned long val);
+ 
+ /* MPAMF_MBWUMON_IDR - MPAM memory bandwidth usage monitor ID register */
+ #define MPAMF_MBWUMON_IDR_NUM_MON       GENMASK(15, 0)
++#define MPAMF_MBWUMON_IDR_SCALE         GENMASK(20, 16)
+ #define MPAMF_MBWUMON_IDR_HAS_RWBW      BIT(28)
+ #define MPAMF_MBWUMON_IDR_LWD           BIT(29)
+ #define MPAMF_MBWUMON_IDR_HAS_LONG      BIT(30)
+@@ -592,4 +609,6 @@ bool mpam_cpbm_hisi_check_invalid(struct rdt_resource *r, unsigned long val);
+ 
+ int mpam_resctrl_prepare_offline(void);
+ 
++u32 get_num_reqpartid(void);
++
+ #endif /* MPAM_INTERNAL_H */
+diff --git a/drivers/platform/mpam/mpam_resctrl.c b/drivers/platform/mpam/mpam_resctrl.c
+index de0f0136abe3..1c3df3ad8dba 100644
+--- a/drivers/platform/mpam/mpam_resctrl.c
++++ b/drivers/platform/mpam/mpam_resctrl.c
+@@ -85,6 +85,84 @@ bool resctrl_arch_is_mbm_core_enabled(void)
+ 	return mbm_core_class;
+ }
+ 
++bool resctrl_arch_is_mbm_enabled(enum resctrl_res_level rid)
++{
++	switch (rid) {
++	case RDT_RESOURCE_L2:
++		return resctrl_arch_is_mbm_core_enabled();
++	case RDT_RESOURCE_L3:
++		return resctrl_arch_is_mbm_local_enabled();
++	case RDT_RESOURCE_MBA:
++		return resctrl_arch_is_mbm_total_enabled();
++	default:
++		return false;
++	}
++}
++
++void resctrl_arch_setup_res_mbm_over(void)
++{
++	struct mpam_resctrl_res *res;
++	int i;
++
++	for (i = 0; i < RDT_NUM_RESOURCES; i++) {
++		res = &mpam_resctrl_exports[i];
++
++		if (!res->class)
++			continue;
++
++		resctrl_setup_dom_overflow(&res->resctrl_res);
++	}
++}
++
++void resctrl_arch_setup_res_mbm_over_exclude_cpu(unsigned int exclude_cpu)
++{
++	struct mpam_resctrl_res *res;
++	struct rdt_domain *d;
++	int i;
++
++	for (i = 0; i < RDT_NUM_RESOURCES; i++) {
++		res = &mpam_resctrl_exports[i];
++
++		if (!res->class)
++			continue;
++
++		d = resctrl_get_domain_from_cpu(exclude_cpu, &res->resctrl_res);
++		if (d)
++			resctrl_setup_dom_overflow_exclude_cpu(&res->resctrl_res,
++								d, exclude_cpu);
++	}
++}
++
++void resctrl_arch_mbm_update(struct rdt_domain *d,
++			     u32 closid, u32 rmid)
++{
++	switch (d->res->rid) {
++	case RDT_RESOURCE_MBA:
++		if (resctrl_arch_is_mbm_total_enabled())
++			resctrl_mbm_update_one(d->res, d,
++					       QOS_L3_MBM_TOTAL_EVENT_ID,
++					       closid, rmid);
++		break;
++
++	case RDT_RESOURCE_L3:
++		if (resctrl_arch_is_mbm_local_enabled())
++			resctrl_mbm_update_one(d->res, d,
++					       QOS_L3_MBM_LOCAL_EVENT_ID,
++					       closid, rmid);
++		break;
++
++	case RDT_RESOURCE_L2:
++		if (resctrl_arch_is_mbm_core_enabled() && !d->res->invisible)
++			resctrl_mbm_update_one(d->res, d,
++					       QOS_L2_MBM_CORE_OVERFLOW_EVENT_ID,
++					       closid, rmid);
++		break;
++
++	default:
++		break;
++	}
++}
++
+ bool resctrl_arch_get_cdp_enabled(enum resctrl_res_level rid)
+ {
+ 	switch (rid) {
+@@ -148,35 +226,144 @@ static bool mpam_resctrl_hide_cdp(enum resctrl_res_level rid)
+  */
+ u32 resctrl_arch_get_num_closid(struct rdt_resource *ignored)
+ {
++	return mpam_intpartid_max + 1;
++}
++
++/*
++ * Determine the effective number of PARTIDs available for resctrl.
++ *
++ * This function performs a one-time check to determine if Narrow-PARTID
++ * can be used. It must be called after mpam_resctrl_pick_{mba,caches}()
++ * have initialized the resource classes, as class properties are used
++ * to detect Narrow-PARTID support.
++ *
++ * The first call occurs in update_rmid_limits(), ensuring the
++ * prerequisite initialization is complete.
++ */
++u32 get_num_reqpartid(void)
++{
++	struct mpam_props *cprops;
++	struct mpam_class *class;
++	static bool first = true;
++	int idx;
++
++	if (first) {
++		idx = srcu_read_lock(&mpam_srcu);
++		list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
++			cprops = &class->props;
++			if (mpam_has_feature(mpam_feat_partid_nrw, cprops))
++				continue;
++
++			if (mpam_has_feature(mpam_feat_mbw_max, cprops) ||
++			    mpam_has_feature(mpam_feat_mbw_min, cprops) ||
++			    mpam_has_feature(mpam_feat_ccap_part, cprops) ||
++			    mpam_has_feature(mpam_feat_cmin, cprops)) {
++				mpam_partid_max = mpam_intpartid_max;
++				break;
++			}
++		}
++		srcu_read_unlock(&mpam_srcu, idx);
++	}
++
++	first = false;
+ 	return mpam_partid_max + 1;
+ }
+ 
+ u32 resctrl_arch_system_num_rmid_idx(void)
+ {
+-	u8 closid_shift = fls(mpam_pmg_max);
+-	u32 num_partid = resctrl_arch_get_num_closid(NULL);
++	return (mpam_pmg_max + 1) * get_num_reqpartid();
++}
++
++static u32 rmid2reqpartid(u32 rmid)
++{
++	u8 pmg_shift = fls(mpam_pmg_max);
++	u32 reqpartid;
++
++	WARN_ON_ONCE(pmg_shift > 8);
++
++	rmid >>= pmg_shift;
++
++	if (cdp_enabled)
++		reqpartid = resctrl_get_config_index(rmid, CDP_DATA);
++	else
++		reqpartid = resctrl_get_config_index(rmid, CDP_NONE);
++
++	return reqpartid;
++}
++
++static u8 rmid2pmg(u32 rmid)
++{
++	u8 pmg_shift = fls(mpam_pmg_max);
++	u32 pmg_mask = ~(~0 << pmg_shift);
++
++	return rmid & pmg_mask;
++}
++
++static u32 req_pmg2rmid(u32 reqpartid, u8 pmg)
++{
++	u8 pmg_shift = fls(mpam_pmg_max);
++	u32 pmg_mask = ~(~0 << pmg_shift);
++
++	if (cdp_enabled)
++		reqpartid >>= 1;
++
++	return (reqpartid << pmg_shift) | (pmg & pmg_mask);
++}
++
++static u32 *reqpartid_map;
++
++u32 req2intpartid(u32 reqpartid)
++{
++	/*
++	 * Directly return intPartid in case that mpam_reset_ris() access
++	 * NULL pointer.
++	 */
++	if (reqpartid < resctrl_arch_get_num_closid(NULL))
++		return reqpartid;
++
++	return reqpartid_map[reqpartid];
++}
++
++static u32 partid2closid(u32 partid)
++{
++	if (cdp_enabled)
++		partid >>= 1;
+ 
+-	return num_partid << closid_shift;
++	return partid;
+ }
+ 
++/*
++ * To avoid the reuse of rmid across multiple control groups, check
++ * the incoming closid to prevent rmid from being reallocated by
++ * resctrl_find_free_rmid().
++ *
++ * If the closid and rmid do not match upon inspection, immediately
++ * returns an invalid rmid. A valid rmid must not exceed 24 bits.
++ */
+ u32 resctrl_arch_rmid_idx_encode(u32 closid, u32 rmid)
+ {
+-	u8 closid_shift = fls(mpam_pmg_max);
++	u32 reqpartid = rmid2reqpartid(rmid);
++
++	/* When enable CDP mode, needs to filter invalid rmid entry out */
++	if (reqpartid >= get_num_reqpartid())
++		return U32_MAX;
+ 
+-	BUG_ON(closid_shift > 8);
++	if (closid != partid2closid(req2intpartid(reqpartid)))
++		return U32_MAX;
+ 
+-	return (closid << closid_shift) | rmid;
++	return rmid;
+ }
+ 
+ void resctrl_arch_rmid_idx_decode(u32 idx, u32 *closid, u32 *rmid)
+ {
+-	u8 closid_shift = fls(mpam_pmg_max);
+-	u32 pmg_mask = ~(~0 << closid_shift);
++	u32 reqpartid = rmid2reqpartid(idx);
++	u32 intpartid = req2intpartid(reqpartid);
+ 
+-	BUG_ON(closid_shift > 8);
++	if (rmid)
++		*rmid = idx;
+ 
+-	*closid = idx >> closid_shift;
+-	*rmid = idx & pmg_mask;
++	if (closid)
++		*closid = partid2closid(intpartid);
+ }
+ 
+ void resctrl_sched_in(struct task_struct *tsk)
+@@ -186,23 +373,22 @@ void resctrl_sched_in(struct task_struct *tsk)
+ 	mpam_thread_switch(tsk);
+ }
+ 
+-void resctrl_arch_set_cpu_default_closid_rmid(int cpu, u32 closid, u32 pmg)
++void resctrl_arch_set_cpu_default_closid_rmid(int cpu, u32 closid, u32 rmid)
+ {
+-	BUG_ON(closid > U16_MAX);
+-	BUG_ON(pmg > U8_MAX);
++	u32 reqpartid = rmid2reqpartid(rmid);
++	u8 pmg = rmid2pmg(rmid);
+ 
+-	if (!cdp_enabled) {
+-		mpam_set_cpu_defaults(cpu, closid, closid, pmg, pmg);
+-	} else {
++	WARN_ON_ONCE(reqpartid > U16_MAX);
++	WARN_ON_ONCE(pmg > U8_MAX);
++
++	if (!cdp_enabled)
++		mpam_set_cpu_defaults(cpu, reqpartid, reqpartid, pmg, pmg);
++	else
+ 		/*
+ 		 * When CDP is enabled, resctrl halves the closid range and we
+ 		 * use odd/even partid for one closid.
+ 		 */
+-		u32 partid_d = resctrl_get_config_index(closid, CDP_DATA);
+-		u32 partid_i = resctrl_get_config_index(closid, CDP_CODE);
+-
+-		mpam_set_cpu_defaults(cpu, partid_d, partid_i, pmg, pmg);
+-	}
++		mpam_set_cpu_defaults(cpu, reqpartid, reqpartid + 1, pmg, pmg);
+ }
+ 
+ void resctrl_arch_sync_cpu_defaults(void *info)
+@@ -221,87 +407,75 @@ void resctrl_arch_sync_cpu_defaults(void *info)
+ 
+ void resctrl_arch_set_closid_rmid(struct task_struct *tsk, u32 closid, u32 rmid)
+ {
++	u32 reqpartid = rmid2reqpartid(rmid);
++	u8 pmg = rmid2pmg(rmid);
+ 
++	WARN_ON_ONCE(reqpartid > U16_MAX);
++	WARN_ON_ONCE(pmg > U8_MAX);
+ 
+-	BUG_ON(closid > U16_MAX);
+-	BUG_ON(rmid > U8_MAX);
+-
+-	if (!cdp_enabled) {
+-		mpam_set_task_partid_pmg(tsk, closid, closid, rmid, rmid);
+-	} else {
+-		u32 partid_d = resctrl_get_config_index(closid, CDP_DATA);
+-		u32 partid_i = resctrl_get_config_index(closid, CDP_CODE);
+-
+-		mpam_set_task_partid_pmg(tsk, partid_d, partid_i, rmid, rmid);
+-	}
++	if (!cdp_enabled)
++		mpam_set_task_partid_pmg(tsk, reqpartid, reqpartid, pmg, pmg);
++	else
++		mpam_set_task_partid_pmg(tsk, reqpartid, reqpartid + 1, pmg, pmg);
+ }
+ 
+ bool resctrl_arch_match_closid(struct task_struct *tsk, u32 closid)
+ {
+ 	u64 regval = mpam_get_regval(tsk);
+-	u32 tsk_closid = FIELD_GET(MPAM_SYSREG_PARTID_D, regval);
++	u32 tsk_partid = FIELD_GET(MPAM1_EL1_PARTID_D, regval);
++
++	tsk_partid = req2intpartid(tsk_partid);
+ 
+ 	if (cdp_enabled)
+-		tsk_closid >>= 1;
++		tsk_partid >>= 1;
+ 
+-	return tsk_closid == closid;
++	return tsk_partid == closid;
+ }
+ 
+ /* The task's pmg is not unique, the partid must be considered too */
+ bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid)
+ {
+ 	u64 regval = mpam_get_regval(tsk);
+-	u32 tsk_closid = FIELD_GET(MPAM_SYSREG_PARTID_D, regval);
+-	u32 tsk_rmid = FIELD_GET(MPAM_SYSREG_PMG_D, regval);
+-
+-	if (cdp_enabled)
+-		tsk_closid >>= 1;
++	u32 tsk_partid = FIELD_GET(MPAM1_EL1_PARTID_D, regval);
++	u32 tsk_pmg = FIELD_GET(MPAM1_EL1_PMG_D, regval);
+ 
+-	return (tsk_closid == closid) && (tsk_rmid == rmid);
++	return (tsk_partid == rmid2reqpartid(rmid)) &&
++	       (tsk_pmg == rmid2pmg(rmid));
+ }
+ 
+ #ifdef CONFIG_RESCTRL_IOMMU
+ int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group, u32 closid,
+ 				       u32 rmid)
+ {
+-	u16 partid;
+-
+-	if (cdp_enabled)
+-		partid = closid << 1;
+-	else
+-		partid = closid;
+-
+-	return iommu_group_set_qos_params(group, partid, rmid);
++	return iommu_group_set_qos_params(group, rmid2reqpartid(rmid),
++					  rmid2pmg(rmid));
+ }
+ 
+ bool resctrl_arch_match_iommu_closid(struct iommu_group *group, u32 closid)
+ {
+-	u16 partid;
+-	int err = iommu_group_get_qos_params(group, &partid, NULL);
++	u16 reqpartid;
++	int err = iommu_group_get_qos_params(group, &reqpartid, NULL);
+ 
+ 	if (err)
+ 		return false;
+ 
+ 	if (cdp_enabled)
+-		partid >>= 1;
++		closid <<= 1;
+ 
+-	return (partid == closid);
++	return req2intpartid(reqpartid) == closid;
+ }
+ 
+ bool resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group,
+ 					  u32 closid, u32 rmid)
+ {
+ 	u8 pmg;
+-	u16 partid;
+-	int err = iommu_group_get_qos_params(group, &partid, &pmg);
++	u16 reqpartid;
++	int err = iommu_group_get_qos_params(group, &reqpartid, &pmg);
+ 
+ 	if (err)
+ 		return false;
+ 
+-	if (cdp_enabled)
+-		partid >>= 1;
+-
+-	return (partid == closid) && (rmid == pmg);
++	return req_pmg2rmid(reqpartid, pmg) == rmid;
+ }
+ #endif
+ 
+@@ -343,6 +517,42 @@ static enum mon_filter_options resctrl_evt_config_to_mpam(u32 local_evt_cfg)
+ 	}
+ }
+ 
++/*
++ * Check whether to skip L2 MBM overflow checking for a given component.
++ *
++ * The number of L2 monitors is less than the number of RMIDs, so we only
++ * check MBM overflow for RMIDs currently being monitored by the monitor.
++ * When handling QOS_L2_MBM_CORE_OVERFLOW_EVENT_ID, we verify if the current
++ * monitoring configuration (partid/pmg) matches the previously saved one in
++ * mbwu_state. If they match, it means this RMID is still being monitored
++ * and we should proceed with overflow check. Otherwise, skip it.
++ *
++ * Returns:
++ *   false - Don't skip, proceed with overflow check (partid/pmg match)
++ *   true  - Skip overflow check (no matching configuration found)
++ */
++static bool mpam_skip_check_l2_overflow(struct mpam_component *comp,
++					struct mon_cfg *cfg)
++{
++	bool ret;
++	unsigned long flags;
++	struct mpam_msc_ris *ris;
++	struct msmon_mbwu_state	*mbwu_state;
++
++	ris = list_first_or_null_rcu(&comp->ris, struct mpam_msc_ris, comp_list);
++	if (!ris)
++		return true;
++
++	mbwu_state = &ris->mbwu_state[cfg->mon];
++
++	spin_lock_irqsave(&ris->msc->mon_sel_lock, flags);
++	ret = (mbwu_state->cfg.partid != cfg->partid ||
++	       mbwu_state->cfg.pmg != cfg->pmg);
++	spin_unlock_irqrestore(&ris->msc->mon_sel_lock, flags);
++
++	return ret;
++}
++
+ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
+ 			   u32 closid, u32 rmid, enum resctrl_event_id eventid,
+ 			   u64 *val, void *arch_mon_ctx)
+@@ -367,6 +577,7 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
+ 	case QOS_L3_MBM_LOCAL_EVENT_ID:
+ 	case QOS_L3_MBM_TOTAL_EVENT_ID:
+ 	case QOS_L2_MBM_CORE_EVENT_ID:
++	case QOS_L2_MBM_CORE_OVERFLOW_EVENT_ID:
+ 		type = mpam_feat_msmon_mbwu;
+ 		break;
+ 	default:
+@@ -384,29 +595,30 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
+ 		num_mon = res->class->props.num_csu_mon;
+ 
+ 	cfg.match_pmg = true;
+-	cfg.pmg = rmid;
++	cfg.pmg = rmid2pmg(rmid);
+ 	cfg.opts = resctrl_evt_config_to_mpam(dom->mbm_local_evt_cfg);
++	cfg.partid = rmid2reqpartid(rmid);
+ 
+-	if (cdp_enabled) {
+-		cfg.partid = resctrl_get_config_index(closid, CDP_DATA);
+-		cfg.mon = cfg.partid % num_mon;
+-		err = mpam_msmon_read(dom->comp, &cfg, type, val);
+-		if (err)
+-			return err;
++	cfg.mon = cfg.partid % num_mon;
+ 
+-		cfg.partid = resctrl_get_config_index(closid, CDP_CODE);
++	if (eventid == QOS_L2_MBM_CORE_OVERFLOW_EVENT_ID) {
++		if (mpam_skip_check_l2_overflow(dom->comp, &cfg))
++			return 0;
++	}
++
++	err = mpam_msmon_read(dom->comp, &cfg, type, val);
++	if (err)
++		return err;
++
++	if (cdp_enabled) {
++		cfg.partid += 1;
+ 		cfg.mon = cfg.partid % num_mon;
+ 		err = mpam_msmon_read(dom->comp, &cfg, type, &cdp_val);
+ 		if (!err) {
+-			pr_debug("read monitor rmid %u %s:%u CODE/DATA: %lld/%lld\n",
+-				resctrl_arch_rmid_idx_encode(closid, rmid),
+-				r->name, dom->comp->comp_id, cdp_val, *val);
++			pr_debug("read monitor closid %u rmid %u %s:%u CODE/DATA: %lld/%lld\n",
++				  closid, rmid, r->name, dom->comp->comp_id, cdp_val, *val);
+ 			*val += cdp_val;
+ 		}
+-	} else {
+-		cfg.partid = closid;
+-		cfg.mon = cfg.partid % num_mon;
+-		err = mpam_msmon_read(dom->comp, &cfg, type, val);
+ 	}
+ 
+ 	return err;
+@@ -428,19 +640,15 @@ void resctrl_arch_reset_rmid(struct rdt_resource *r, struct rdt_domain *d,
+ 	num_mbwu_mon = res->class->props.num_mbwu_mon;
+ 	cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid) % num_mbwu_mon;
+ 	cfg.match_pmg = true;
+-	cfg.pmg = rmid;
++	cfg.pmg = rmid2pmg(rmid);
++	cfg.partid = rmid2reqpartid(rmid);
+ 
+ 	dom = container_of(d, struct mpam_resctrl_dom, resctrl_dom);
++	mpam_msmon_reset_mbwu(dom->comp, &cfg);
+ 
+ 	if (cdp_enabled) {
+-		cfg.partid = closid << 1;
+-		mpam_msmon_reset_mbwu(dom->comp, &cfg);
+-
+ 		cfg.partid += 1;
+ 		mpam_msmon_reset_mbwu(dom->comp, &cfg);
+-	} else {
+-		cfg.partid = closid;
+-		mpam_msmon_reset_mbwu(dom->comp, &cfg);
+ 	}
+ }
+ 
+@@ -448,9 +656,13 @@ void resctrl_arch_reset_rmid(struct rdt_resource *r, struct rdt_domain *d,
+  * The rmid realloc threshold should be for the smallest cache exposed to
+  * resctrl.
+  */
+-static void update_rmid_limits(unsigned int size)
++static void update_rmid_limits(struct mpam_class *class)
+ {
+ 	u32 num_unique_pmg = resctrl_arch_system_num_rmid_idx();
++	unsigned int size;
++
++	/* Assume cache levels are the same size for all CPUs... */
++	size = get_cpu_cacheinfo_size(smp_processor_id(), class->level);
+ 
+ 	if (WARN_ON_ONCE(!size))
+ 		return;
+@@ -614,7 +826,7 @@ static u32 mbw_max_to_percent(u16 mbw_max, u8 wd)
+ 	u8 bit;
+ 	u32 divisor = 2, value = 0, precision = get_wd_precision(wd);
+ 
+-	if (mbw_max == GENMASK(15, 15 - wd + 1))
++	if (mbw_max == GENMASK(15, 16 - wd))
+ 		return MAX_MBA_BW;
+ 
+ 	for (bit = 15; bit; bit--) {
+@@ -643,11 +855,12 @@ static u16 percent_to_mbw_max(u32 pc, u8 wd)
+ 	u8 bit;
+ 	u32 divisor = 2, value = 0, precision = get_wd_precision(wd);
+ 
+-	if (WARN_ON_ONCE(wd > 15))
+-		return MAX_MBA_BW;
++	if (WARN_ON_ONCE(wd > 16))
++		/* All bits valid as fallback */
++		return GENMASK(15, 0);
+ 
+ 	if (pc == MAX_MBA_BW)
+-		return GENMASK(15, 15 - wd + 1);
++		return GENMASK(15, 16 - wd);
+ 
+ 	pc *= precision;
+ 
+@@ -662,7 +875,7 @@ static u16 percent_to_mbw_max(u32 pc, u8 wd)
+ 			break;
+ 	}
+ 
+-	value &= GENMASK(15, 15 - wd + 1);
++	value &= GENMASK(15, 16 - wd);
+ 
+ 	return value;
+ }
+@@ -709,7 +922,6 @@ static u16 ca_max_to_percent(u16 ca_max, u8 wd)
+ static void mpam_resctrl_pick_caches(void)
+ {
+ 	int idx;
+-	unsigned int cache_size;
+ 	struct mpam_class *class;
+ 	struct mpam_resctrl_res *res;
+ 	bool has_cpor, has_cmax, has_cmin, has_intpri;
+@@ -749,18 +961,6 @@ static void mpam_resctrl_pick_caches(void)
+ 			continue;
+ 		}
+ 
+-		/* Assume cache levels are the same size for all CPUs... */
+-		cache_size = get_cpu_cacheinfo_size(smp_processor_id(), class->level);
+-		if (!cache_size) {
+-			pr_debug("pick_caches: Could not read cache size\n");
+-			continue;
+-		}
+-
+-		if (mpam_has_feature(mpam_feat_msmon_csu, cprops)) {
+-			if (class->level == 3)
+-				update_rmid_limits(cache_size);
+-		}
+-
+ 		if (has_cpor) {
+ 			if (class->level == 2) {
+ 				res = &mpam_resctrl_exports[RDT_RESOURCE_L2];
+@@ -836,6 +1036,12 @@ static void mpam_resctrl_pick_mba(void)
+ 			res = &mpam_resctrl_exports[RDT_RESOURCE_MBA];
+ 			res->class = class;
+ 			res->resctrl_res.name = "MB";
++
++			if (mpam_has_feature(mpam_feat_mbw_max, cprops)) {
++				res = &mpam_resctrl_exports[RDT_RESOURCE_MB_OPT];
++				res->class = class;
++				res->resctrl_res.name = "MBOPT";
++			}
+ 		}
+ 
+ 		if (has_mbw_min) {
+@@ -859,6 +1065,23 @@ static void mpam_resctrl_pick_mba(void)
+ 	srcu_read_unlock(&mpam_srcu, idx);
+ }
+ 
++static void mpam_resctrl_pick_counters(void)
++{
++	struct mpam_class *class;
++	int idx;
++
++	idx = srcu_read_lock(&mpam_srcu);
++
++	list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
++		if (mpam_has_feature(mpam_feat_msmon_csu, &class->props)) {
++			if (class->level == 3)
++				update_rmid_limits(class);
++		}
++	}
++
++	srcu_read_unlock(&mpam_srcu, idx);
++}
++
+ bool resctrl_arch_is_evt_configurable(enum resctrl_event_id evt)
+ {
+ 	struct mpam_props *cprops;
+@@ -869,6 +1092,12 @@ bool resctrl_arch_is_evt_configurable(enum resctrl_event_id evt)
+ 			return false;
+ 		cprops = &mbm_local_class->props;
+ 
++		return mpam_has_feature(mpam_feat_msmon_mbwu_rwbw, cprops);
++	case QOS_L3_MBM_TOTAL_EVENT_ID:
++		if (!mbm_total_class)
++			return false;
++
++		cprops = &mbm_total_class->props;
+ 		return mpam_has_feature(mpam_feat_msmon_mbwu_rwbw, cprops);
+ 	default:
+ 		return false;
+@@ -938,7 +1167,7 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
+ 		r->cache.arch_has_sparse_bitmasks = true;
+ 
+ 		/* mpam_devices will reject empty bitmaps */
+-		r->cache.min_cbm_bits = 1;
++		r->cache.min_cbm_bits = mpam_min_cbm_bits(res->resctrl_res.rid);
+ 
+ 		/* TODO: kill these properties off as they are derivatives */
+ 		r->format_str = "%d=%0*x";
+@@ -1124,6 +1353,23 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
+ 			r->alloc_capable = true;
+ 		break;
+ 
++	case RDT_RESOURCE_MB_OPT:
++		r->format_str = "%d=%0*u";
++		r->schema_fmt = RESCTRL_SCHEMA_RANGE;
++		r->fflags = RFTYPE_RES_MB;
++		r->default_ctrl = GENMASK(cprops->bwa_wd - 1, 0);
++		r->membw.max_bw = GENMASK(cprops->bwa_wd - 1, 0);
++		r->data_width = 5;
++
++		r->membw.delay_linear = true;
++		r->membw.throttle_mode = THREAD_THROTTLE_UNDEFINED;
++		r->membw.min_bw = 1;
++		r->membw.bw_gran = 1;
++
++		if (class_has_usable_mba(cprops))
++			r->alloc_capable = true;
++		break;
++
+ 	default:
+ 		break;
+ 	}
+@@ -1145,6 +1391,112 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
+ 	return 0;
+ }
+ 
++static int reqpartid_init(void)
++{
++	int req_num, idx;
++
++	req_num = get_num_reqpartid();
++	reqpartid_map = kcalloc(req_num, sizeof(u32), GFP_KERNEL);
++	if (!reqpartid_map)
++		return -ENOMEM;
++
++	for (idx = 0; idx < req_num; idx++)
++		reqpartid_map[idx] = idx;
++
++	return 0;
++}
++
++void reqpartid_exit(void)
++{
++	kfree(reqpartid_map);
++}
++
++void update_rmid_entries_for_reqpartid(u32 reqpartid)
++{
++	int pmg;
++	u32 intpartid = reqpartid_map[reqpartid];
++	u32 closid = partid2closid(intpartid);
++
++	for (pmg = 0; pmg <= mpam_pmg_max; pmg++)
++		rmid_entry_reassign_closid(closid, req_pmg2rmid(reqpartid, pmg));
++}
++
++static int mpam_sync_config(u32 reqpartid)
++{
++	struct mpam_component *comp;
++	struct mpam_class *class;
++	int err, idx;
++
++	idx = srcu_read_lock(&mpam_srcu);
++	list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
++		list_for_each_entry(comp, &class->components, class_list) {
++			err = mpam_apply_config(comp, reqpartid, NULL, true);
++			if (err)
++				return err;
++		}
++	}
++	srcu_read_unlock(&mpam_srcu, idx);
++
++	return 0;
++}
++
++int resctrl_arch_rmid_expand(u32 closid)
++{
++	int i;
++
++	for (i = resctrl_arch_get_num_closid(NULL);
++	     i < get_num_reqpartid(); i++) {
++		if (reqpartid_map[i] >= resctrl_arch_get_num_closid(NULL)) {
++			if (cdp_enabled) {
++				reqpartid_map[i] = resctrl_get_config_index(closid, CDP_DATA);
++				mpam_sync_config(i);
++
++				reqpartid_map[i + 1] = resctrl_get_config_index(closid, CDP_CODE);
++				mpam_sync_config(i + 1);
++
++			} else {
++				reqpartid_map[i] = resctrl_get_config_index(closid, CDP_NONE);
++				mpam_sync_config(i);
++			}
++
++			update_rmid_entries_for_reqpartid(i);
++			return i;
++		}
++	}
++
++	return -ENOSPC;
++}
++
++void resctrl_arch_rmid_reclaim(u32 closid, u32 rmid)
++{
++	int pmg;
++	u32 intpartid;
++	int reqpartid = rmid2reqpartid(rmid);
++
++	if (reqpartid < resctrl_arch_get_num_closid(NULL))
++		return;
++
++	if (cdp_enabled)
++		intpartid = resctrl_get_config_index(closid, CDP_DATA);
++	else
++		intpartid = resctrl_get_config_index(closid, CDP_NONE);
++
++	WARN_ON_ONCE(intpartid != req2intpartid(reqpartid));
++
++	for (pmg = 0; pmg <= mpam_pmg_max; pmg++) {
++		if (rmid_is_occupied(closid, req_pmg2rmid(reqpartid, pmg)))
++			break;
++	}
++
++	if (pmg > mpam_pmg_max) {
++		reqpartid_map[reqpartid] = reqpartid;
++		if (cdp_enabled)
++			reqpartid_map[reqpartid + 1] = reqpartid + 1;
++
++		update_rmid_entries_for_reqpartid(reqpartid);
++	}
++}
++
+ int mpam_resctrl_setup(void)
+ {
+ 	int err = 0;
+@@ -1163,7 +1515,7 @@ int mpam_resctrl_setup(void)
+ 
+ 	mpam_resctrl_pick_caches();
+ 	mpam_resctrl_pick_mba();
+-	/* TODO: mpam_resctrl_pick_counters(); */
++	mpam_resctrl_pick_counters();
+ 
+ 	for (i = 0; i < RDT_NUM_RESOURCES; i++) {
+ 		res = &mpam_resctrl_exports[i];
+@@ -1176,24 +1528,35 @@ int mpam_resctrl_setup(void)
+ 	}
+ 	cpus_read_unlock();
+ 
+-	if (!err && !exposed_alloc_capable && !exposed_mon_capable)
+-		err = -EOPNOTSUPP;
+-
+-	if (!err) {
+-		if (!is_power_of_2(mpam_pmg_max + 1)) {
+-			/*
+-			 * If not all the partid*pmg values are valid indexes,
+-			 * resctrl may allocate pmg that don't exist. This
+-			 * should cause an error interrupt.
+-			 */
+-			pr_warn("Number of PMG is not a power of 2! resctrl may misbehave");
+-		}
++	if (err)
++		return err;
+ 
+-		err = resctrl_init();
+-		if (!err)
+-			WRITE_ONCE(resctrl_enabled, true);
++	if (!exposed_alloc_capable && !exposed_mon_capable)
++		return -EOPNOTSUPP;
++
++	err = reqpartid_init();
++	if (err)
++		return err;
++
++	if (!is_power_of_2(mpam_pmg_max + 1)) {
++		/*
++		 * If not all the partid*pmg values are valid indexes,
++		 * resctrl may allocate pmg that don't exist. This
++		 * should cause an error interrupt.
++		 */
++		pr_warn("Number of PMG is not a power of 2! resctrl may misbehave");
+ 	}
+ 
++	err = resctrl_init();
++	if (err)
++		goto out;
++
++	WRITE_ONCE(resctrl_enabled, true);
++
++	return 0;
++
++out:
++	reqpartid_exit();
+ 	return err;
+ }
+ 
+@@ -1204,6 +1567,7 @@ void mpam_resctrl_exit(void)
+ 
+ 	WRITE_ONCE(resctrl_enabled, false);
+ 	resctrl_exit();
++	reqpartid_exit();
+ }
+ 
+ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
+@@ -1272,6 +1636,10 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
+ 		configured_by = mpam_feat_max_limit;
+ 		break;
+ 
++	case RDT_RESOURCE_MB_OPT:
++		configured_by = mpam_feat_mbw_max;
++		break;
++
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1294,14 +1662,20 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
+ 		/* TODO: Scaling is not yet supported */
+ 		return mbw_pbm_to_percent(cfg->mbw_pbm, cprops);
+ 	case mpam_feat_mbw_max:
+-		return mbw_max_to_percent(cfg->mbw_max, cprops->bwa_wd);
++		if (r->rid == RDT_RESOURCE_MBA)
++			return mbw_max_to_percent(cfg->mbw_max, cprops->bwa_wd);
++		else if (r->rid == RDT_RESOURCE_MB_OPT)
++			return cfg->mbw_max >> (16 - cprops->bwa_wd);
++		break;
+ 	case mpam_feat_mbw_min:
+ 		return mbw_max_to_percent(cfg->mbw_min, cprops->bwa_wd);
+ 	case mpam_feat_max_limit:
+ 		return cfg->max_limit;
+ 	default:
+-		return -EINVAL;
++		break;
+ 	}
++
++	return -EINVAL;
+ }
+ 
+ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
+@@ -1377,6 +1751,10 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
+ 		cfg.max_limit = cfg_val;
+ 		mpam_set_feature(mpam_feat_max_limit, &cfg);
+ 		break;
++	case RDT_RESOURCE_MB_OPT:
++		cfg.mbw_max = cfg_val << (16 - cprops->bwa_wd);
++		mpam_set_feature(mpam_feat_mbw_max, &cfg);
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1387,15 +1765,15 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
+ 	 */
+ 	if (mpam_resctrl_hide_cdp(r->rid)) {
+ 		partid = resctrl_get_config_index(closid, CDP_CODE);
+-		err = mpam_apply_config(dom->comp, partid, &cfg);
++		err = mpam_apply_config(dom->comp, partid, &cfg, false);
+ 		if (err)
+ 			return err;
+ 
+ 		partid = resctrl_get_config_index(closid, CDP_DATA);
+-		return mpam_apply_config(dom->comp, partid, &cfg);
++		return mpam_apply_config(dom->comp, partid, &cfg, false);
+ 
+ 	} else {
+-		return mpam_apply_config(dom->comp, partid, &cfg);
++		return mpam_apply_config(dom->comp, partid, &cfg, false);
+ 	}
+ }
+ 
+@@ -1484,6 +1862,7 @@ mpam_resctrl_alloc_domain(unsigned int cpu, struct mpam_resctrl_res *res)
+ 
+ 	/* TODO: this list should be sorted */
+ 	list_add_tail(&dom->resctrl_dom.list, &res->resctrl_res.domains);
++	dom->resctrl_dom.res = &res->resctrl_res;
+ 
+ 	return dom;
+ }
+diff --git a/fs/debugfs/file.c b/fs/debugfs/file.c
+index 33676b8cf56c..319d4261d467 100644
+--- a/fs/debugfs/file.c
++++ b/fs/debugfs/file.c
+@@ -1003,6 +1003,72 @@ void debugfs_create_str(const char *name, umode_t mode,
+ }
+ EXPORT_SYMBOL_GPL(debugfs_create_str);
+ 
++static ssize_t debugfs_read_file_cpumask(struct file *file,
++					 char __user *user_buf,
++					 size_t count, loff_t *ppos)
++{
++	struct dentry *dentry = F_DENTRY(file);
++	struct cpumask *cpumask;
++	char *kernel_buf;
++	ssize_t ret;
++	int len;
++
++	ret = debugfs_file_get(dentry);
++	if (unlikely(ret))
++		return ret;
++
++	/* How long is a piece of string? */
++	kernel_buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
++	if (!kernel_buf) {
++		ret = -ENOMEM;
++		goto kfree;
++	}
++
++	cpumask = (struct cpumask *)file->private_data;
++	len = scnprintf(kernel_buf, PAGE_SIZE,
++			"%*pb\n", cpumask_pr_args(cpumask));
++	if (len + 1 >= PAGE_SIZE) {
++		ret = -EIO;
++		goto debugfs_put;
++	}
++
++	ret = simple_read_from_buffer(user_buf, count, ppos, kernel_buf, len);
++
++debugfs_put:
++	debugfs_file_put(dentry);
++kfree:
++	kfree(kernel_buf);
++	return ret;
++}
++
++static const struct file_operations fops_cpumask_ro = {
++	.read =	debugfs_read_file_cpumask,
++	.open =	simple_open,
++	.llseek =	default_llseek,
++};
++
++/**
++ * debugfs_create_cpumask - create a read-only debugfs file that is used to read a cpumask
++ * @name: a pointer to a string containing the name of the file to create.
++ * @mode: the permission that the file should have
++ * @parent: a pointer to the parent dentry for this file.  This should be a
++ *          directory dentry if set.  If this parameter is %NULL, then the
++ *          file will be created in the root of the debugfs filesystem.
++ * @value: a pointer to the variable that the file should read from.
++ *
++ * This function creates a file in debugfs with the given name that
++ * contains the value of the variable @value.
++ */
++void debugfs_create_cpumask(const char *name, umode_t mode,
++			    struct dentry *parent, struct cpumask *value)
++{
++	/* Only read-only is supported */
++	WARN_ON_ONCE(mode & S_IWUGO);
++
++	debugfs_create_mode_unsafe(name, mode, parent, value, &fops_cpumask_ro,
++				   &fops_cpumask_ro, &fops_cpumask_ro);
++}
++
+ static ssize_t read_file_blob(struct file *file, char __user *user_buf,
+ 			      size_t count, loff_t *ppos)
+ {
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index 4c5ddd03ce08..a5f35e72ebc6 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -299,6 +299,5 @@ bool has_busy_rmid(struct rdt_domain *d);
+ void __check_limbo(struct rdt_domain *d, bool force_free);
+ void rdt_staged_configs_clear(void);
+ int resctrl_find_cleanest_closid(void);
+-struct rmid_entry *resctrl_find_free_rmid(u32 closid);
+ 
+ #endif /* _FS_RESCTRL_INTERNAL_H */
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index b651b37e7e65..e152c646f35b 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -115,6 +115,8 @@ static void limbo_release_entry(struct rmid_entry *entry)
+ 
+ 	if (IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
+ 		closid_num_dirty_rmid[entry->closid]--;
++
++	resctrl_arch_rmid_reclaim(entry->closid, entry->rmid);
+ }
+ 
+ /*
+@@ -178,7 +180,7 @@ bool has_busy_rmid(struct rdt_domain *d)
+ 	return find_first_bit(d->rmid_busy_llc, idx_limit) != idx_limit;
+ }
+ 
+-struct rmid_entry *resctrl_find_free_rmid(u32 closid)
++static struct rmid_entry *__resctrl_find_free_rmid(u32 closid)
+ {
+ 	struct rmid_entry *itr;
+ 	u32 itr_idx, cmp_idx;
+@@ -195,7 +197,12 @@ struct rmid_entry *resctrl_find_free_rmid(u32 closid)
+ 		 * very first entry will be returned.
+ 		 */
+ 		itr_idx = resctrl_arch_rmid_idx_encode(itr->closid, itr->rmid);
++		if (itr_idx == U32_MAX)
++			continue;
++
+ 		cmp_idx = resctrl_arch_rmid_idx_encode(closid, itr->rmid);
++		if (cmp_idx == U32_MAX)
++			continue;
+ 
+ 		if (itr_idx == cmp_idx)
+ 			return itr;
+@@ -204,6 +211,25 @@ struct rmid_entry *resctrl_find_free_rmid(u32 closid)
+ 	return ERR_PTR(-ENOSPC);
+ }
+ 
++static struct rmid_entry *resctrl_find_free_rmid(u32 closid)
++{
++	struct rmid_entry *err;
++	int ret;
++
++	err = __resctrl_find_free_rmid(closid);
++	if (err == ERR_PTR(-ENOSPC)) {
++		ret = resctrl_arch_rmid_expand(closid);
++		if (ret < 0)
++			/* Out of rmid */
++			goto out;
++
++		/* Try it again */
++		return __resctrl_find_free_rmid(closid);
++	}
++out:
++	return err;
++}
++
+ /**
+  * resctrl_find_cleanest_closid() - Find a CLOSID where all the associated
+  *                                  RMID are clean, or the CLOSID that has
+@@ -265,7 +291,7 @@ int alloc_rmid(u32 closid)
+ 	if (IS_ERR(entry))
+ 		return PTR_ERR(entry);
+ 
+-	list_del(&entry->list);
++	list_del_init(&entry->list);
+ 	return entry->rmid;
+ }
+ 
+@@ -320,8 +346,17 @@ void free_rmid(u32 closid, u32 rmid)
+ 
+ 	if (resctrl_arch_is_llc_occupancy_enabled())
+ 		add_rmid_to_limbo(entry);
+-	else
++	else {
+ 		list_add_tail(&entry->list, &rmid_free_lru);
++		resctrl_arch_rmid_reclaim(closid, rmid);
++	}
++}
++
++bool rmid_is_occupied(u32 closid, u32 rmid)
++{
++	u32 idx = resctrl_arch_rmid_idx_encode(closid, rmid);
++
++	return list_empty(&rmid_ptrs[idx].list);
+ }
+ 
+ static struct mbm_state *get_mbm_state(struct rdt_domain *d, u32 closid,
+@@ -548,8 +583,9 @@ static void update_mba_bw(struct rdtgroup *rgrp, struct rdt_domain *dom_mbm)
+ 	}
+ }
+ 
+-static void mbm_update(struct rdt_resource *r, struct rdt_domain *d,
+-		       u32 closid, u32 rmid)
++void resctrl_mbm_update_one(struct rdt_resource *r, struct rdt_domain *d,
++			    enum resctrl_event_id evtid,
++			    u32 closid, u32 rmid)
+ {
+ 	struct rmid_read rr;
+ 
+@@ -561,56 +597,26 @@ static void mbm_update(struct rdt_resource *r, struct rdt_domain *d,
+ 	 * This is protected from concurrent reads from user
+ 	 * as both the user and we hold the global mutex.
+ 	 */
+-	if (resctrl_arch_is_mbm_total_enabled()) {
+-		rr.evtid = QOS_L3_MBM_TOTAL_EVENT_ID;
+-		rr.val = 0;
+-		rr.arch_mon_ctx = resctrl_arch_mon_ctx_alloc(rr.r, rr.evtid);
+-		if (IS_ERR(rr.arch_mon_ctx)) {
+-			pr_warn_ratelimited("Failed to allocate monitor context: %ld",
+-					    PTR_ERR(rr.arch_mon_ctx));
+-			return;
+-		}
+-
+-		__mon_event_count(closid, rmid, &rr);
+-
+-		resctrl_arch_mon_ctx_free(rr.r, rr.evtid, rr.arch_mon_ctx);
++	rr.evtid = evtid;
++	rr.val = 0;
++	rr.arch_mon_ctx = resctrl_arch_mon_ctx_alloc(rr.r, rr.evtid);
++	if (IS_ERR(rr.arch_mon_ctx)) {
++		pr_warn_ratelimited("Failed to allocate monitor context: %ld",
++				     PTR_ERR(rr.arch_mon_ctx));
++		return;
+ 	}
+-	if (resctrl_arch_is_mbm_local_enabled()) {
+-		rr.evtid = QOS_L3_MBM_LOCAL_EVENT_ID;
+-		rr.val = 0;
+-		rr.arch_mon_ctx = resctrl_arch_mon_ctx_alloc(rr.r, rr.evtid);
+-		if (IS_ERR(rr.arch_mon_ctx)) {
+-			pr_warn_ratelimited("Failed to allocate monitor context: %ld",
+-					    PTR_ERR(rr.arch_mon_ctx));
+-			return;
+-		}
+-
+-		__mon_event_count(closid, rmid, &rr);
+ 
+-		/*
+-		 * Call the MBA software controller only for the
+-		 * control groups and when user has enabled
+-		 * the software controller explicitly.
+-		 */
+-		if (is_mba_sc(NULL))
+-			mbm_bw_count(closid, rmid, &rr);
+-
+-		resctrl_arch_mon_ctx_free(rr.r, rr.evtid, rr.arch_mon_ctx);
+-	}
+-	if (resctrl_arch_is_mbm_core_enabled()) {
+-		rr.evtid = QOS_L2_MBM_CORE_EVENT_ID;
+-		rr.val = 0;
+-		rr.arch_mon_ctx = resctrl_arch_mon_ctx_alloc(rr.r, rr.evtid);
+-		if (IS_ERR(rr.arch_mon_ctx)) {
+-			pr_warn_ratelimited("Failed to allocate monitor context: %ld",
+-					    PTR_ERR(rr.arch_mon_ctx));
+-			return;
+-		}
++	__mon_event_count(closid, rmid, &rr);
+ 
+-		__mon_event_count(closid, rmid, &rr);
++	/*
++	 * Call the MBA software controller only for the
++	 * control groups and when user has enabled
++	 * the software controller explicitly.
++	 */
++	if ((evtid == QOS_L3_MBM_LOCAL_EVENT_ID) && is_mba_sc(NULL))
++		mbm_bw_count(closid, rmid, &rr);
+ 
+-		resctrl_arch_mon_ctx_free(rr.r, rr.evtid, rr.arch_mon_ctx);
+-	}
++	resctrl_arch_mon_ctx_free(rr.r, rr.evtid, rr.arch_mon_ctx);
+ }
+ 
+ /*
+@@ -666,7 +672,6 @@ void mbm_handle_overflow(struct work_struct *work)
+ 	unsigned long delay = msecs_to_jiffies(MBM_OVERFLOW_INTERVAL);
+ 	struct rdtgroup *prgrp, *crgrp;
+ 	struct list_head *head;
+-	struct rdt_resource *r;
+ 	struct rdt_domain *d;
+ 
+ 	cpus_read_lock();
+@@ -679,15 +684,14 @@ void mbm_handle_overflow(struct work_struct *work)
+ 	if (!resctrl_mounted || !resctrl_arch_mon_capable())
+ 		goto out_unlock;
+ 
+-	r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+ 	d = container_of(work, struct rdt_domain, mbm_over.work);
+ 
+ 	list_for_each_entry(prgrp, &rdt_all_groups, rdtgroup_list) {
+-		mbm_update(r, d, prgrp->closid, prgrp->mon.rmid);
++		resctrl_arch_mbm_update(d, prgrp->closid, prgrp->mon.rmid);
+ 
+ 		head = &prgrp->mon.crdtgrp_list;
+ 		list_for_each_entry(crgrp, head, mon.crdtgrp_list)
+-			mbm_update(r, d, crgrp->closid, crgrp->mon.rmid);
++			resctrl_arch_mbm_update(d, crgrp->closid, crgrp->mon.rmid);
+ 
+ 		if (is_mba_sc(NULL))
+ 			update_mba_bw(prgrp, d);
+@@ -733,6 +737,13 @@ void mbm_setup_overflow_handler(struct rdt_domain *dom, unsigned long delay_ms,
+ 		schedule_delayed_work_on(cpu, &dom->mbm_over, delay);
+ }
+ 
++void rmid_entry_reassign_closid(u32 closid, u32 rmid)
++{
++	u32 idx = resctrl_arch_rmid_idx_encode(closid, rmid);
++
++	rmid_ptrs[idx].closid = closid;
++}
++
+ static int dom_data_init(struct rdt_resource *r)
+ {
+ 	u32 idx_limit = resctrl_arch_system_num_rmid_idx();
+@@ -780,7 +791,7 @@ static int dom_data_init(struct rdt_resource *r)
+ 	idx = resctrl_arch_rmid_idx_encode(RESCTRL_RESERVED_CLOSID,
+ 					   RESCTRL_RESERVED_RMID);
+ 	entry = __rmid_entry(idx);
+-	list_del(&entry->list);
++	list_del_init(&entry->list);
+ 
+ out_unlock:
+ 	mutex_unlock(&rdtgroup_mutex);
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 642f91435d81..c8c78db9da6a 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -111,13 +111,6 @@ void rdt_staged_configs_clear(void)
+ 	}
+ }
+ 
+-static bool resctrl_is_mbm_enabled(void)
+-{
+-	return (resctrl_arch_is_mbm_total_enabled() ||
+-		resctrl_arch_is_mbm_local_enabled() ||
+-		resctrl_arch_is_mbm_core_enabled());
+-}
+-
+ static bool resctrl_is_mbm_event(int e)
+ {
+ 	return (e == QOS_L3_MBM_TOTAL_EVENT_ID ||
+@@ -822,17 +815,21 @@ static int rdt_move_group_iommus(struct rdtgroup *from, struct rdtgroup *to)
+ 		kobject_get(group_kobj);
+ 
+ 		group = iommu_group_get_from_kobj(group_kobj);
+-		if (!group)
++		if (!group) {
++			kobject_put(group_kobj);
+ 			continue;
++		}
+ 
+ 		if (!from || iommu_matches_rdtgroup(group, from)) {
+ 			err = kstrtoint(group_kobj->name, 0, &iommu_group_id);
+-			if (err)
+-				break;
++			if (!err)
++				err = rdtgroup_move_iommu(iommu_group_id, to);
++		}
+ 
+-			err = rdtgroup_move_iommu(iommu_group_id, to);
+-			if (err)
+-				break;
++		iommu_group_put(group);
++		if (err) {
++			kobject_put(group_kobj);
++			break;
+ 		}
+ 	}
+ 
+@@ -933,11 +930,15 @@ static void show_rdt_iommu(struct rdtgroup *r, struct seq_file *s)
+ 		kobject_get(group_kobj);
+ 
+ 		group = iommu_group_get_from_kobj(group_kobj);
+-		if (!group)
++		if (!group) {
++			kobject_put(group_kobj);
+ 			continue;
++		}
+ 
+ 		if (iommu_matches_rdtgroup(group, r))
+ 			seq_printf(s, "iommu_group:%s\n", group_kobj->name);
++
++		iommu_group_put(group);
+ 	}
+ 
+ 	kset_put(iommu_groups);
+@@ -2686,12 +2687,22 @@ static void schemata_list_destroy(void)
+ 	}
+ }
+ 
++void resctrl_setup_dom_overflow(struct rdt_resource *r)
++{
++	struct rdt_domain *d;
++
++	if (resctrl_arch_is_mbm_enabled(r->rid) &&
++	    resctrl_arch_would_mbm_overflow()) {
++		list_for_each_entry(d, &r->domains, list)
++			mbm_setup_overflow_handler(d, MBM_OVERFLOW_INTERVAL,
++						   RESCTRL_PICK_ANY_CPU);
++	}
++}
++
+ static int rdt_get_tree(struct fs_context *fc)
+ {
+-	struct rdt_resource *l3 = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+ 	struct rdt_fs_context *ctx = rdt_fc2context(fc);
+ 	unsigned long flags = RFTYPE_CTRL_BASE;
+-	struct rdt_domain *dom;
+ 	int ret;
+ 
+ 	cpus_read_lock();
+@@ -2765,11 +2776,7 @@ static int rdt_get_tree(struct fs_context *fc)
+ 	if (resctrl_arch_alloc_capable() || resctrl_arch_mon_capable())
+ 		resctrl_mounted = true;
+ 
+-	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow()) {
+-		list_for_each_entry(dom, &l3->domains, list)
+-			mbm_setup_overflow_handler(dom, MBM_OVERFLOW_INTERVAL,
+-						   RESCTRL_PICK_ANY_CPU);
+-	}
++	resctrl_arch_setup_res_mbm_over();
+ 
+ 	goto out;
+ 
+@@ -3000,17 +3007,37 @@ static void rmdir_all_sub(void)
+ 	kernfs_remove(kn_mondata);
+ }
+ 
++static void rdt_flush_limbo(void)
++{
++	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
++	struct rdt_domain *d;
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
++		return;
++
++	if (!resctrl_arch_is_llc_occupancy_enabled())
++		return;
++
++	list_for_each_entry(d, &r->domains, list) {
++		if (has_busy_rmid(d)) {
++			__check_limbo(d, true);
++			cancel_delayed_work(&d->cqm_limbo);
++		}
++	}
++}
++
+ static void rdt_kill_sb(struct super_block *sb)
+ {
+ 	cpus_read_lock();
+ 	mutex_lock(&rdtgroup_mutex);
+ 
+-	rdt_disable_ctx();
+-
+ 	/* Put everything back to default values. */
+ 	resctrl_arch_reset_resources();
+ 
+ 	rmdir_all_sub();
++	rdt_flush_limbo();
++	rdt_disable_ctx();
++
+ 	if (IS_ENABLED(CONFIG_RESCTRL_FS_PSEUDO_LOCK))
+ 		rdt_pseudo_lock_release();
+ 	rdtgroup_default.mode = RDT_MODE_SHAREABLE;
+@@ -3844,8 +3871,6 @@ static void mongrp_reparent(struct rdtgroup *rdtgrp,
+ 	list_move_tail(&rdtgrp->mon.crdtgrp_list,
+ 		       &new_prdtgrp->mon.crdtgrp_list);
+ 
+-	free_rmid(rdtgrp->closid, rdtgrp->mon.rmid);
+-	rdtgrp->mon.rmid = alloc_rmid(new_prdtgrp->closid);
+ 	rdtgrp->mon.parent = new_prdtgrp;
+ 	rdtgrp->closid = new_prdtgrp->closid;
+ 
+@@ -3860,11 +3885,13 @@ static int rdtgroup_rename(struct kernfs_node *kn,
+ {
+ 	struct kernfs_node *kn_parent;
+ 	struct rdtgroup *new_prdtgrp;
+-	struct rmid_entry *entry;
+ 	struct rdtgroup *rdtgrp;
+ 	cpumask_var_t tmpmask;
+ 	int ret;
+ 
++	if (IS_ENABLED(CONFIG_ARM64_MPAM))
++		return -EPERM;
++
+ 	rdtgrp = kernfs_to_rdtgroup(kn);
+ 	new_prdtgrp = kernfs_to_rdtgroup(new_parent);
+ 	if (!rdtgrp || !new_prdtgrp)
+@@ -3920,20 +3947,6 @@ static int rdtgroup_rename(struct kernfs_node *kn,
+ 		goto out;
+ 	}
+ 
+-	/*
+-	 * Unlike RDT, the rmid and closid in MPAM have a hierarchical
+-	 * relationship. Therefore, first check whether there are still
+-	 * free rmids available under the target closid.
+-	 */
+-	if (IS_ENABLED(CONFIG_ARM64_MPAM)) {
+-		entry = resctrl_find_free_rmid(new_prdtgrp->closid);
+-		if (IS_ERR(entry)) {
+-			rdt_last_cmd_puts("Destination has been out of RMIDs\n");
+-			ret = PTR_ERR(entry);
+-			goto out;
+-		}
+-	}
+-
+ 	/*
+ 	 * Allocate the cpumask for use in mongrp_reparent() to avoid the
+ 	 * possibility of failing to allocate it after kernfs_rename() has
+@@ -4051,7 +4064,7 @@ void resctrl_offline_domain(struct rdt_resource *r, struct rdt_domain *d)
+ 	if (resctrl_mounted && resctrl_arch_mon_capable())
+ 		rmdir_mondata_subdir_allrdtgrp(r, d->id);
+ 
+-	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow())
++	if (resctrl_arch_is_mbm_enabled(r->rid) && resctrl_arch_would_mbm_overflow())
+ 		cancel_delayed_work(&d->mbm_over);
+ 	if (resctrl_arch_is_llc_occupancy_enabled() && has_busy_rmid(d)) {
+ 		/*
+@@ -4099,16 +4112,6 @@ static int domain_setup_mon_state(struct rdt_resource *r, struct rdt_domain *d)
+ 			return -ENOMEM;
+ 		}
+ 	}
+-	if (resctrl_arch_is_mbm_core_enabled()) {
+-		tsize = sizeof(*d->mbm_core);
+-		d->mbm_core = kcalloc(idx_limit, tsize, GFP_KERNEL);
+-		if (!d->mbm_core) {
+-			bitmap_free(d->rmid_busy_llc);
+-			kfree(d->mbm_total);
+-			kfree(d->mbm_local);
+-			return -ENOMEM;
+-		}
+-	}
+ 
+ 	return 0;
+ }
+@@ -4132,7 +4135,7 @@ int resctrl_online_domain(struct rdt_resource *r, struct rdt_domain *d)
+ 	if (err)
+ 		goto out_unlock;
+ 
+-	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow()) {
++	if (resctrl_arch_is_mbm_enabled(r->rid) && resctrl_arch_would_mbm_overflow()) {
+ 		INIT_DELAYED_WORK(&d->mbm_over, mbm_handle_overflow);
+ 		mbm_setup_overflow_handler(d, MBM_OVERFLOW_INTERVAL,
+ 					   RESCTRL_PICK_ANY_CPU);
+@@ -4174,6 +4177,21 @@ static void clear_childcpus(struct rdtgroup *r, unsigned int cpu)
+ 	}
+ }
+ 
++void resctrl_setup_dom_overflow_exclude_cpu(struct rdt_resource *r,
++					    struct rdt_domain *d,
++					    unsigned int exclude_cpu)
++{
++	if (!d)
++		return;
++
++	if (resctrl_arch_is_mbm_enabled(r->rid) &&
++	    exclude_cpu == d->mbm_work_cpu &&
++	    resctrl_arch_would_mbm_overflow()) {
++		cancel_delayed_work(&d->mbm_over);
++		mbm_setup_overflow_handler(d, 0, exclude_cpu);
++	}
++}
++
+ void resctrl_offline_cpu(unsigned int cpu)
+ {
+ 	struct rdt_resource *l3 = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+@@ -4193,11 +4211,6 @@ void resctrl_offline_cpu(unsigned int cpu)
+ 
+ 	d = resctrl_get_domain_from_cpu(cpu, l3);
+ 	if (d) {
+-		if (resctrl_is_mbm_enabled() && cpu == d->mbm_work_cpu &&
+-		    resctrl_arch_would_mbm_overflow()) {
+-			cancel_delayed_work(&d->mbm_over);
+-			mbm_setup_overflow_handler(d, 0, cpu);
+-		}
+ 		if (resctrl_arch_is_llc_occupancy_enabled() &&
+ 		    cpu == d->cqm_work_cpu && has_busy_rmid(d)) {
+ 			cancel_delayed_work(&d->cqm_limbo);
+@@ -4205,6 +4218,8 @@ void resctrl_offline_cpu(unsigned int cpu)
+ 		}
+ 	}
+ 
++	resctrl_arch_setup_res_mbm_over_exclude_cpu(cpu);
++
+ out_unlock:
+ 	mutex_unlock(&rdtgroup_mutex);
+ }
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 5d60e1c6ca6c..25c62a42bd2c 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -68,6 +68,7 @@ bool resctrl_arch_is_l2c_occupancy_enabled(void);
+ bool resctrl_arch_is_mbm_core_enabled(void);
+ bool resctrl_arch_is_mbm_local_enabled(void);
+ bool resctrl_arch_is_mbm_total_enabled(void);
++bool resctrl_arch_is_mbm_enabled(enum resctrl_res_level rid);
+ bool resctrl_arch_would_mbm_overflow(void);
+ 
+ /* reset cached configurations, then all devices */
+@@ -77,9 +78,26 @@ bool resctrl_arch_get_cdp_enabled(enum resctrl_res_level ignored);
+ int resctrl_arch_set_cdp_enabled(enum resctrl_res_level ignored, bool enable);
+ bool resctrl_arch_match_closid(struct task_struct *tsk, u32 closid);
+ bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid);
++
++/**
++ * resctrl_arch_rmid_expand() - Expand the RMID resources for the specified closid.
++ * @closid:	closid that matches the rmid.
++ *
++ * Return:
++ * 0 on success, or -ENOSPC etc on error.
++ */
++int resctrl_arch_rmid_expand(u32 closid);
++
++/**
++ * resctrl_arch_rmid_reclaim() - Reclaim the rmid resources for the specified closid.
++ * @closid:	closid that matches the rmid.
++ * @rmid:	Reclaim the rmid specified.
++ */
++void resctrl_arch_rmid_reclaim(u32 closid, u32 rmid);
++
+ void resctrl_arch_set_cpu_default_closid(int cpu, u32 closid);
+ void resctrl_arch_set_closid_rmid(struct task_struct *tsk, u32 closid, u32 rmid);
+-void resctrl_arch_set_cpu_default_closid_rmid(int cpu, u32 closid, u32 pmg);
++void resctrl_arch_set_cpu_default_closid_rmid(int cpu, u32 closid, u32 rmid);
+ void resctrl_sched_in(struct task_struct *tsk);
+ u32 resctrl_arch_rmid_idx_encode(u32 closid, u32 rmid);
+ void resctrl_arch_rmid_idx_decode(u32 idx, u32 *closid, u32 *rmid);
+diff --git a/include/linux/debugfs.h b/include/linux/debugfs.h
+index ea2d919fd9c7..4dfc67da0bb0 100644
+--- a/include/linux/debugfs.h
++++ b/include/linux/debugfs.h
+@@ -140,6 +140,8 @@ void debugfs_create_bool(const char *name, umode_t mode, struct dentry *parent,
+ 			 bool *value);
+ void debugfs_create_str(const char *name, umode_t mode,
+ 			struct dentry *parent, char **value);
++void debugfs_create_cpumask(const char *name, umode_t mode,
++			    struct dentry *parent, struct cpumask *value);
+ 
+ struct dentry *debugfs_create_blob(const char *name, umode_t mode,
+ 				  struct dentry *parent,
+@@ -320,6 +322,10 @@ static inline void debugfs_create_str(const char *name, umode_t mode,
+ 				      char **value)
+ { }
+ 
++static inline void debugfs_create_cpumask(const char *name, umode_t mode,
++					  struct dentry *parent, struct cpumask *value)
++{ }
++
+ static inline struct dentry *debugfs_create_blob(const char *name, umode_t mode,
+ 				  struct dentry *parent,
+ 				  struct debugfs_blob_wrapper *blob)
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 74fc71d9a6ba..1b8f89a5830e 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -119,7 +119,6 @@ struct rdt_domain {
+ 	unsigned long			*rmid_busy_llc;
+ 	struct mbm_state		*mbm_total;
+ 	struct mbm_state		*mbm_local;
+-	struct mbm_state		*mbm_core;
+ 	struct delayed_work		mbm_over;
+ 	struct delayed_work		cqm_limbo;
+ 	int				mbm_work_cpu;
+@@ -127,6 +126,7 @@ struct rdt_domain {
+ 	struct pseudo_lock_region	*plr;
+ 	struct resctrl_staged_config	staged_config[CDP_NUM_TYPES];
+ 	u32				*mbps_val;
++	struct rdt_resource		*res;		/* Just for MPAM */
+ };
+ 
+ /**
+@@ -444,6 +444,27 @@ void resctrl_arch_reset_rmid_all(struct rdt_resource *r, struct rdt_domain *d);
+ extern unsigned int resctrl_rmid_realloc_threshold;
+ extern unsigned int resctrl_rmid_realloc_limit;
+ 
++/**
++ * rmid_is_occupied() - Check whether the specified rmid has been
++ *                      allocated.
++ * @closid:	Specify the closid that matches the rmid.
++ * @rmid:	Specify the rmid entry to check status.
++ *
++ * This function checks if the rmid_entry is currently allocated by testing
++ * whether its list node is empty (removed from the free list).
++ *
++ * Return:
++ * True if the specified rmid is still in use.
++ */
++bool rmid_is_occupied(u32 closid, u32 rmid);
++
++/**
++ * rmid_entry_reassign_closid() - Update the closid field of a rmid_entry.
++ * @closid:	Specify the reassigned closid.
++ * @rmid:	Specify the rmid entry to update closid.
++ */
++void rmid_entry_reassign_closid(u32 closid, u32 rmid);
++
+ extern bool resctrl_mounted;
+ 
+ int resctrl_init(void);
+@@ -452,6 +473,18 @@ void resctrl_exit(void);
+ int resctrl_arch_mon_resource_init(void);
+ void mbm_config_rftype_init(const char *config);
+ 
++void resctrl_setup_dom_overflow(struct rdt_resource *r);
++void resctrl_setup_dom_overflow_exclude_cpu(struct rdt_resource *r,
++					    struct rdt_domain *d,
++					    unsigned int exclude_cpu);
++void resctrl_arch_setup_res_mbm_over(void);
++void resctrl_arch_setup_res_mbm_over_exclude_cpu(unsigned int exclude_cpu);
++
++void resctrl_mbm_update_one(struct rdt_resource *r, struct rdt_domain *d,
++			    enum resctrl_event_id evtid,
++			    u32 closid, u32 rmid);
++void resctrl_arch_mbm_update(struct rdt_domain *d, u32 closid, u32 rmid);
++
+ /* When supported, the architecture must implement these */
+ #ifdef CONFIG_RESCTRL_IOMMU
+ int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group, u32 closid,
+diff --git a/include/linux/resctrl_types.h b/include/linux/resctrl_types.h
+index eaea801a8552..8cdbaf2eb607 100644
+--- a/include/linux/resctrl_types.h
++++ b/include/linux/resctrl_types.h
+@@ -94,6 +94,7 @@ enum resctrl_res_level {
+ 	RDT_RESOURCE_L2_PRI,
+ 	RDT_RESOURCE_MB_PRI,
+ 	RDT_RESOURCE_MB_HDL,
++	RDT_RESOURCE_MB_OPT,
+ #endif
+ 
+ 	/* Must be the last */
+@@ -120,6 +121,7 @@ enum resctrl_event_id {
+ 
+ 	QOS_L2_OCCUP_EVENT_ID,
+ 	QOS_L2_MBM_CORE_EVENT_ID,
++	QOS_L2_MBM_CORE_OVERFLOW_EVENT_ID,
+ };
+ 
+ #endif /* CONFIG_X86_CPU_RESCTRL */

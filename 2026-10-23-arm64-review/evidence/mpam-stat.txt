@@ -1,0 +1,14 @@
+ arch/arm64/include/asm/mpam.h               |  17 +-
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c |   3 +
+ drivers/platform/mpam/mpam_devices.c        | 273 ++++++++++--
+ drivers/platform/mpam/mpam_internal.h       |  21 +-
+ drivers/platform/mpam/mpam_resctrl.c        | 625 ++++++++++++++++++++++------
+ fs/debugfs/file.c                           |  66 +++
+ fs/resctrl/internal.h                       |   1 -
+ fs/resctrl/monitor.c                        | 123 +++---
+ fs/resctrl/rdtgroup.c                       | 129 +++---
+ include/linux/arm_mpam.h                    |  20 +-
+ include/linux/debugfs.h                     |   6 +
+ include/linux/resctrl.h                     |  35 +-
+ include/linux/resctrl_types.h               |   2 +
+ 13 files changed, 1041 insertions(+), 280 deletions(-)

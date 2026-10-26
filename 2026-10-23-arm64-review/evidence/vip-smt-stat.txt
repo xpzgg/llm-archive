@@ -1,0 +1,11 @@
+ Documentation/admin-guide/kernel-parameters.txt |   4 +
+ arch/arm64/Kconfig.turbo                        |  16 +
+ arch/arm64/configs/openeuler_defconfig          |   1 +
+ arch/arm64/include/asm/vip_smt.h                | 109 ++++++
+ arch/arm64/kernel/Makefile                      |   1 +
+ arch/arm64/kernel/cpufeature.c                  |   9 +
+ arch/arm64/kernel/cpuinfo.c                     |   7 +
+ arch/arm64/kernel/idle.c                        |  51 ++-
+ arch/arm64/kernel/vip_smt.c                     | 483 ++++++++++++++++++++++++
+ arch/arm64/tools/cpucaps                        |   2 +-
+ 10 files changed, 653 insertions(+), 30 deletions(-)

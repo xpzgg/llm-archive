@@ -1,0 +1,13 @@
+ Documentation/virt/kvm/api.rst          |  58 ++++
+ arch/arm64/include/asm/kvm_host.h       |  53 ++++
+ arch/arm64/include/uapi/asm/kvm.h       |   2 +
+ arch/arm64/kvm/Kconfig                  |  12 +
+ arch/arm64/kvm/arm.c                    | 526 +++++++++++++++++++++++++++++++-
+ arch/arm64/kvm/hisilicon/hisi_virt.c    |   9 +
+ arch/arm64/kvm/hyp/include/hyp/switch.h |   4 +
+ arch/arm64/kvm/sys_regs.c               |  79 ++++-
+ arch/arm64/kvm/sys_regs.h               |   6 +
+ arch/arm64/kvm/trace_arm.h              |  47 +++
+ arch/arm64/tools/sysreg                 |  23 +-
+ include/uapi/linux/kvm.h                |  14 +
+ 12 files changed, 829 insertions(+), 4 deletions(-)

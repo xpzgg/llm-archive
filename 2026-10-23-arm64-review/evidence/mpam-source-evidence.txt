@@ -1,0 +1,638 @@
+
+=== arch/arm64/include/asm/mpam.h:131-169 ===
+131: 
+132: u32 req2intpartid(u32 reqpartid);
+133: 
+134: static inline u32 mpam_get_regval_partid(u64 regval)
+135: {
+136: 	u32 reqpartid = (regval & MPAM_SYSREG_PARTID_D) >> 16;
+137: 
+138: 	return req2intpartid(reqpartid);
+139: }
+140: 
+141: static inline void mpam_thread_switch(struct task_struct *tsk)
+142: {
+143: 	u64 oldregval;
+144: 	int cpu = smp_processor_id();
+145: 	u64 regval = mpam_get_regval(tsk);
+146: 
+147: 	if (!IS_ENABLED(CONFIG_ARM64_MPAM) ||
+148: 	    !static_branch_likely(&mpam_enabled))
+149: 		return;
+150: 
+151: 	if (!regval || !mpam_get_regval_partid(regval))
+152: 		regval = READ_ONCE(per_cpu(arm64_mpam_default, cpu));
+153: 
+154: 	oldregval = READ_ONCE(per_cpu(arm64_mpam_current, cpu));
+155: 	if (oldregval == regval)
+156: 		return;
+157: 
+158: 	/* Synchronising this write is left until the ERET to EL0 */
+159: 	write_sysreg_s(regval, SYS_MPAM1_EL1);
+160: 	isb();
+161: 
+162: 	write_sysreg_s(regval, SYS_MPAM0_EL1);
+163: 	WRITE_ONCE(per_cpu(arm64_mpam_current, cpu), regval);
+164: }
+165: #endif /* __ASM__MPAM_H */
+
+=== drivers/platform/mpam/mpam_resctrl.c:243-265 ===
+243: u32 get_num_reqpartid(void)
+244: {
+245: 	struct mpam_props *cprops;
+246: 	struct mpam_class *class;
+247: 	static bool first = true;
+248: 	int idx;
+249: 
+250: 	if (first) {
+251: 		idx = srcu_read_lock(&mpam_srcu);
+252: 		list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
+253: 			cprops = &class->props;
+254: 			if (mpam_has_feature(mpam_feat_partid_nrw, cprops))
+255: 				continue;
+256: 
+257: 			if (mpam_has_feature(mpam_feat_mbw_max, cprops) ||
+258: 			    mpam_has_feature(mpam_feat_mbw_min, cprops) ||
+259: 			    mpam_has_feature(mpam_feat_ccap_part, cprops) ||
+260: 			    mpam_has_feature(mpam_feat_cmin, cprops)) {
+261: 				mpam_partid_max = mpam_intpartid_max;
+262: 				break;
+263: 			}
+264: 		}
+265: 		srcu_read_unlock(&mpam_srcu, idx);
+
+=== drivers/platform/mpam/mpam_resctrl.c:313-325 ===
+313: static u32 *reqpartid_map;
+314: 
+315: u32 req2intpartid(u32 reqpartid)
+316: {
+317: 	/*
+318: 	 * Directly return intPartid in case that mpam_reset_ris() access
+319: 	 * NULL pointer.
+320: 	 */
+321: 	if (reqpartid < resctrl_arch_get_num_closid(NULL))
+322: 		return reqpartid;
+323: 
+324: 	return reqpartid_map[reqpartid];
+325: }
+
+=== drivers/platform/mpam/mpam_resctrl.c:1394-1499 ===
+1394: static int reqpartid_init(void)
+1395: {
+1396: 	int req_num, idx;
+1397: 
+1398: 	req_num = get_num_reqpartid();
+1399: 	reqpartid_map = kcalloc(req_num, sizeof(u32), GFP_KERNEL);
+1400: 	if (!reqpartid_map)
+1401: 		return -ENOMEM;
+1402: 
+1403: 	for (idx = 0; idx < req_num; idx++)
+1404: 		reqpartid_map[idx] = idx;
+1405: 
+1406: 	return 0;
+1407: }
+1408: 
+1409: void reqpartid_exit(void)
+1410: {
+1411: 	kfree(reqpartid_map);
+1412: }
+1413: 
+1414: void update_rmid_entries_for_reqpartid(u32 reqpartid)
+1415: {
+1416: 	int pmg;
+1417: 	u32 intpartid = reqpartid_map[reqpartid];
+1418: 	u32 closid = partid2closid(intpartid);
+1419: 
+1420: 	for (pmg = 0; pmg <= mpam_pmg_max; pmg++)
+1421: 		rmid_entry_reassign_closid(closid, req_pmg2rmid(reqpartid, pmg));
+1422: }
+1423: 
+1424: static int mpam_sync_config(u32 reqpartid)
+1425: {
+1426: 	struct mpam_component *comp;
+1427: 	struct mpam_class *class;
+1428: 	int err, idx;
+1429: 
+1430: 	idx = srcu_read_lock(&mpam_srcu);
+1431: 	list_for_each_entry_rcu(class, &mpam_classes, classes_list) {
+1432: 		list_for_each_entry(comp, &class->components, class_list) {
+1433: 			err = mpam_apply_config(comp, reqpartid, NULL, true);
+1434: 			if (err)
+1435: 				return err;
+1436: 		}
+1437: 	}
+1438: 	srcu_read_unlock(&mpam_srcu, idx);
+1439: 
+1440: 	return 0;
+1441: }
+1442: 
+1443: int resctrl_arch_rmid_expand(u32 closid)
+1444: {
+1445: 	int i;
+1446: 
+1447: 	for (i = resctrl_arch_get_num_closid(NULL);
+1448: 	     i < get_num_reqpartid(); i++) {
+1449: 		if (reqpartid_map[i] >= resctrl_arch_get_num_closid(NULL)) {
+1450: 			if (cdp_enabled) {
+1451: 				reqpartid_map[i] = resctrl_get_config_index(closid, CDP_DATA);
+1452: 				mpam_sync_config(i);
+1453: 
+1454: 				reqpartid_map[i + 1] = resctrl_get_config_index(closid, CDP_CODE);
+1455: 				mpam_sync_config(i + 1);
+1456: 
+1457: 			} else {
+1458: 				reqpartid_map[i] = resctrl_get_config_index(closid, CDP_NONE);
+1459: 				mpam_sync_config(i);
+1460: 			}
+1461: 
+1462: 			update_rmid_entries_for_reqpartid(i);
+1463: 			return i;
+1464: 		}
+1465: 	}
+1466: 
+1467: 	return -ENOSPC;
+1468: }
+1469: 
+1470: void resctrl_arch_rmid_reclaim(u32 closid, u32 rmid)
+1471: {
+1472: 	int pmg;
+1473: 	u32 intpartid;
+1474: 	int reqpartid = rmid2reqpartid(rmid);
+1475: 
+1476: 	if (reqpartid < resctrl_arch_get_num_closid(NULL))
+1477: 		return;
+1478: 
+1479: 	if (cdp_enabled)
+1480: 		intpartid = resctrl_get_config_index(closid, CDP_DATA);
+1481: 	else
+1482: 		intpartid = resctrl_get_config_index(closid, CDP_NONE);
+1483: 
+1484: 	WARN_ON_ONCE(intpartid != req2intpartid(reqpartid));
+1485: 
+1486: 	for (pmg = 0; pmg <= mpam_pmg_max; pmg++) {
+1487: 		if (rmid_is_occupied(closid, req_pmg2rmid(reqpartid, pmg)))
+1488: 			break;
+1489: 	}
+1490: 
+1491: 	if (pmg > mpam_pmg_max) {
+1492: 		reqpartid_map[reqpartid] = reqpartid;
+1493: 		if (cdp_enabled)
+1494: 			reqpartid_map[reqpartid + 1] = reqpartid + 1;
+1495: 
+1496: 		update_rmid_entries_for_reqpartid(reqpartid);
+1497: 	}
+1498: }
+1499: 
+
+=== drivers/platform/mpam/mpam_resctrl.c:1563-1572 ===
+1563: void mpam_resctrl_exit(void)
+1564: {
+1565: 	if (!READ_ONCE(resctrl_enabled))
+1566: 		return;
+1567: 
+1568: 	WRITE_ONCE(resctrl_enabled, false);
+1569: 	resctrl_exit();
+1570: 	reqpartid_exit();
+1571: }
+1572: 
+
+=== drivers/platform/mpam/mpam_resctrl.c:1935-1955 ===
+1935: int mpam_resctrl_prepare_offline(void)
+1936: {
+1937: 	struct mpam_resctrl_res *res;
+1938: 	int i;
+1939: 
+1940: 	if (resctrl_mounted) {
+1941: 		for (i = 0; i < RDT_NUM_RESOURCES; i++) {
+1942: 			res = &mpam_resctrl_exports[i];
+1943: 
+1944: 			if (res->resctrl_res.is_volatile &&
+1945: 			   !res->resctrl_res.invisible) {
+1946: 				pr_info("%s is working, umount /sys/fs/resctrl first.\n",
+1947: 					res->resctrl_res.name);
+1948: 				return -EBUSY;
+1949: 			}
+1950: 		}
+1951: 	}
+1952: 
+1953: 	return 0;
+1954: }
+1955: 
+
+=== drivers/platform/mpam/mpam_devices.c:338-402 ===
+338: static void mpam_class_destroy(struct mpam_class *class)
+339: {
+340: 	lockdep_assert_held(&mpam_list_lock);
+341: 
+342: 	list_del_rcu(&class->classes_list);
+343: 	synchronize_srcu(&mpam_srcu);
+344: 	kfree(class);
+345: }
+346: 
+347: static void mpam_comp_destroy(struct mpam_component *comp)
+348: {
+349: 	struct mpam_class *class = comp->class;
+350: 
+351: 	lockdep_assert_held(&mpam_list_lock);
+352: 
+353: 	list_del_rcu(&comp->class_list);
+354: 	synchronize_srcu(&mpam_srcu);
+355: 	kfree(comp);
+356: 
+357: 	if (list_empty(&class->components))
+358: 		mpam_class_destroy(class);
+359: }
+360: 
+361: /* synchronise_srcu() before freeing ris */
+362: static void mpam_ris_destroy(struct mpam_msc_ris *ris)
+363: {
+364: 	struct mpam_component *comp = ris->comp;
+365: 	struct mpam_class *class = comp->class;
+366: 	struct mpam_msc *msc = ris->msc;
+367: 
+368: 	lockdep_assert_held(&mpam_list_lock);
+369: 	lockdep_assert_preemption_enabled();
+370: 
+371: 	clear_bit(ris->ris_idx, msc->ris_idxs);
+372: 	list_del_rcu(&ris->comp_list);
+373: 	list_del_rcu(&ris->msc_list);
+374: 
+375: 	cpumask_andnot(&comp->affinity, &comp->affinity, &ris->affinity);
+376: 	cpumask_andnot(&class->affinity, &class->affinity, &ris->affinity);
+377: 
+378: 	if (list_empty(&comp->ris))
+379: 		mpam_comp_destroy(comp);
+380: }
+381: 
+382: /*
+383:  * There are two ways of reaching a struct mpam_msc_ris. Via the
+384:  * class->component->ris, or via the msc.
+385:  * When destroying the msc, the other side needs unlinking and cleaning up too.
+386:  * synchronise_srcu() before freeing msc.
+387:  */
+388: static void mpam_msc_destroy(struct mpam_msc *msc)
+389: {
+390: 	struct mpam_msc_ris *ris, *tmp;
+391: 
+392: 	lockdep_assert_held(&mpam_list_lock);
+393: 	lockdep_assert_preemption_enabled();
+394: 
+395: 	list_for_each_entry_safe(ris, tmp, &msc->ris, msc_list)
+396: 		mpam_ris_destroy(ris);
+397: 
+398: 	debugfs_remove_recursive(msc->debugfs);
+399: 	msc->debugfs = NULL;
+400: 
+401: 	free_percpu(msc->error_dev_id);
+402: }
+
+=== drivers/platform/mpam/mpam_devices.c:782-856 ===
+782: 	if (FIELD_GET(MPAMF_IDR_HAS_PARTID_NRW, ris->idr) &&
+783: 	    class->type != MPAM_CLASS_UNKNOWN) {
+784: 		u32 nrwidr = mpam_read_partsel_reg(msc, PARTID_NRW_IDR);
+785: 		u16 partid_max = FIELD_GET(MPAMF_PARTID_NRW_IDR_INTPARTID_MAX, nrwidr);
+786: 
+787: 		mpam_set_feature(mpam_feat_partid_nrw, props);
+788: 		msc->intpartid_max = min(msc->partid_max, partid_max);
+789: 	} else {
+790: 		msc->intpartid_max = msc->partid_max;
+791: 	}
+792: }
+793: 
+794: static int mpam_pmg_max_workaround(u64 idr)
+795: {
+796: 	if (is_midr_in_range_list(hisi_cpus))
+797: 		return 0;
+798: 
+799: 	return FIELD_GET(MPAMF_IDR_PMG_MAX, idr);
+800: }
+801: 
+802: static int mpam_msc_hw_probe(struct mpam_msc *msc)
+803: {
+804: 	u64 idr;
+805: 	u16 partid_max;
+806: 	u8 ris_idx, pmg_max;
+807: 	struct mpam_msc_ris *ris;
+808: 
+809: 	lockdep_assert_held(&msc->lock);
+810: 
+811: 	spin_lock(&msc->part_sel_lock);
+812: 	idr = mpam_read_partsel_reg(msc, AIDR);
+813: 	if ((idr & MPAMF_AIDR_ARCH_MAJOR_REV) != MPAM_ARCHITECTURE_V1) {
+814: 		pr_err_once("%s does not match MPAM architecture v1.0\n",
+815: 			    dev_name(&msc->pdev->dev));
+816: 		spin_unlock(&msc->part_sel_lock);
+817: 		return -EIO;
+818: 	}
+819: 
+820: 	idr = mpam_msc_read_idr(msc);
+821: 	spin_unlock(&msc->part_sel_lock);
+822: 
+823: 	msc->ris_max = FIELD_GET(MPAMF_IDR_RIS_MAX, idr);
+824: 
+825: 	/* Use these values so partid/pmg always starts with a valid value */
+826: 	msc->partid_max = FIELD_GET(MPAMF_IDR_PARTID_MAX, idr);
+827: 	msc->pmg_max = mpam_pmg_max_workaround(idr);
+828: 
+829: 	for (ris_idx = 0; ris_idx <= msc->ris_max; ris_idx++) {
+830: 		spin_lock(&msc->part_sel_lock);
+831: 		__mpam_part_sel(ris_idx, 0, msc);
+832: 		idr = mpam_msc_read_idr(msc);
+833: 		spin_unlock(&msc->part_sel_lock);
+834: 
+835: 		partid_max = FIELD_GET(MPAMF_IDR_PARTID_MAX, idr);
+836: 		pmg_max = FIELD_GET(MPAMF_IDR_PMG_MAX, idr);
+837: 		msc->partid_max = min(msc->partid_max, partid_max);
+838: 		msc->pmg_max = min(msc->pmg_max, pmg_max);
+839: 		msc->has_extd_esr = FIELD_GET(MPAMF_IDR_HAS_EXT_ESR, idr);
+840: 
+841: 		ris = mpam_get_or_create_ris(msc, ris_idx);
+842: 		if (IS_ERR(ris)) {
+843: 			return PTR_ERR(ris);
+844: 		}
+845: 		ris->idr = idr;
+846: 
+847: 		spin_lock(&msc->part_sel_lock);
+848: 		__mpam_part_sel(ris_idx, 0, msc);
+849: 		mpam_ris_hw_probe(ris);
+850: 		spin_unlock(&msc->part_sel_lock);
+851: 	}
+852: 
+853: 	spin_lock(&partid_max_lock);
+854: 	mpam_partid_max = min(mpam_partid_max, msc->partid_max);
+855: 	mpam_intpartid_max = min(mpam_intpartid_max, msc->intpartid_max);
+856: 	mpam_pmg_max = min(mpam_pmg_max, msc->pmg_max);
+
+=== drivers/platform/mpam/mpam_devices.c:1583-1611 ===
+1583: 		cfg = &mbwu_state->cfg;
+1584: 
+1585: 		spin_lock_irqsave(&msc->mon_sel_lock, flags);
+1586: 		mon_sel = FIELD_PREP(MSMON_CFG_MON_SEL_MON_SEL, i) |
+1587: 			  FIELD_PREP(MSMON_CFG_MON_SEL_RIS, ris->ris_idx);
+1588: 		mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
+1589: 
+1590: 		cur_flt = mpam_read_monsel_reg(msc, CFG_MBWU_FLT);
+1591: 		cur_ctl = mpam_read_monsel_reg(msc, CFG_MBWU_CTL);
+1592: 		mpam_write_monsel_reg(msc, CFG_MBWU_CTL, 0);
+1593: 
+1594: 		if (mpam_ris_has_mbwu_long_counter(ris)) {
+1595: 			val = mpam_msc_read_mbwu_l(msc);
+1596: 			mpam_msc_zero_mbwu_l(msc);
+1597: 		} else {
+1598: 			val = mpam_read_monsel_reg(msc, MBWU);
+1599: 			mpam_write_monsel_reg(msc, MBWU, 0);
+1600: 		}
+1601: 
+1602: 		cfg->mon = i;
+1603: 		cfg->pmg = FIELD_GET(MSMON_CFG_MBWU_FLT_PMG, cur_flt);
+1604: 		cfg->match_pmg = FIELD_GET(MSMON_CFG_x_CTL_MATCH_PMG, cur_ctl);
+1605: 		cfg->partid = FIELD_GET(MSMON_CFG_MBWU_FLT_PARTID, cur_flt);
+1606: 		mbwu_state->correction += val;
+1607: 		mbwu_state->enabled = FIELD_GET(MSMON_CFG_x_CTL_EN, cur_ctl);
+1608: 		spin_unlock_irqrestore(&msc->mon_sel_lock, flags);
+1609: 	}
+1610: 
+1611: 	return 0;
+
+=== drivers/platform/mpam/mpam_devices.c:1680-1713 ===
+1680: }
+1681: 
+1682: static void mpam_reprogram_msc(struct mpam_msc *msc)
+1683: {
+1684: 	int idx;
+1685: 	u16 partid;
+1686: 	bool reset;
+1687: 	struct mpam_config *cfg;
+1688: 	struct mpam_msc_ris *ris;
+1689: 
+1690: 	lockdep_assert_held(&msc->lock);
+1691: 
+1692: 	idx = srcu_read_lock(&mpam_srcu);
+1693: 	list_for_each_entry_rcu(ris, &msc->ris, msc_list) {
+1694: 		if (!mpam_is_enabled() && !ris->in_reset_state) {
+1695: 			mpam_touch_msc(msc, &mpam_reset_ris, ris);
+1696: 			ris->in_reset_state = true;
+1697: 			continue;
+1698: 		}
+1699: 
+1700: 		reset = true;
+1701: 		for (partid = 0; partid < resctrl_arch_get_num_closid(NULL); partid++) {
+1702: 			cfg = &ris->comp->cfg[partid];
+1703: 			if (cfg->features)
+1704: 				reset = false;
+1705: 
+1706: 			mpam_reprogram_ris_partid(ris, partid, cfg);
+1707: 		}
+1708: 		ris->in_reset_state = reset;
+1709: 
+1710: 		if (mpam_has_feature(mpam_feat_msmon_mbwu, &ris->props))
+1711: 			mpam_touch_msc(msc, &mpam_restore_mbwu_state, ris);
+1712: 	}
+1713: 	srcu_read_unlock(&mpam_srcu, idx);
+
+=== drivers/platform/mpam/mpam_devices.c:2647-2665 ===
+2647: 
+2648: 	mutex_lock(&mpam_cpuhp_state_lock);
+2649: 	if (mpam_cpuhp_state) {
+2650: 		cpuhp_remove_state(mpam_cpuhp_state);
+2651: 		mpam_cpuhp_state = 0;
+2652: 	}
+2653: 	mutex_unlock(&mpam_cpuhp_state_lock);
+2654: 
+2655: 	mpam_resctrl_exit();
+2656: 
+2657: 	static_branch_disable(&mpam_enabled);
+2658: 
+2659: 	mpam_unregister_irqs();
+2660: 
+2661: 	idx = srcu_read_lock(&mpam_srcu);
+2662: 	list_for_each_entry_rcu(class, &mpam_classes, classes_list)
+2663: 		mpam_reset_class(class);
+2664: 	srcu_read_unlock(&mpam_srcu, idx);
+2665: 
+
+=== drivers/platform/mpam/mpam_devices.c:2704-2720 ===
+2704: 
+2705: static int mpam_msc_drv_remove(struct platform_device *pdev)
+2706: {
+2707: 	struct mpam_msc *msc = platform_get_drvdata(pdev);
+2708: 
+2709: 	if (!msc)
+2710: 		return 0;
+2711: 
+2712: 	mutex_lock(&mpam_list_lock);
+2713: 	mpam_num_msc--;
+2714: 	platform_set_drvdata(pdev, NULL);
+2715: 	list_del_rcu(&msc->glbl_list);
+2716: 	synchronize_srcu(&mpam_srcu);
+2717: 	mpam_msc_destroy(msc);
+2718: 	mutex_unlock(&mpam_list_lock);
+2719: 
+2720: 	return 0;
+
+=== drivers/platform/mpam/mpam_devices.c:2730-2798 ===
+2730: static int __write_config(void *arg)
+2731: {
+2732: 	int closid_num = resctrl_arch_get_num_closid(NULL);
+2733: 	struct mpam_write_config_arg *c = arg;
+2734: 	u32 reqpartid;
+2735: 
+2736: 	if (c->sync) {
+2737: 		/* c->partid should be within the range of reqPARTIDs */
+2738: 		WARN_ON_ONCE(c->partid < closid_num);
+2739: 
+2740: 		mpam_reprogram_ris_partid(c->ris, c->partid,
+2741: 					 &c->comp->cfg[req2intpartid(c->partid)]);
+2742: 		return 0;
+2743: 	}
+2744: 
+2745: 	/* c->partid should be within the range of intPARTIDs */
+2746: 	WARN_ON_ONCE(c->partid >= closid_num);
+2747: 
+2748: 	mpam_reprogram_ris_partid(c->ris, c->partid,
+2749: 				 &c->comp->cfg[c->partid]);
+2750: 
+2751: 	/* Synchronize the configuration to each sub-monitoring group. */
+2752: 	for (reqpartid = closid_num;
+2753: 	     reqpartid < get_num_reqpartid(); reqpartid++) {
+2754: 		if (req2intpartid(reqpartid) == c->partid)
+2755: 			mpam_reprogram_ris_partid(c->ris, reqpartid,
+2756: 						 &c->comp->cfg[c->partid]);
+2757: 	}
+2758: 
+2759: 	return 0;
+2760: }
+2761: 
+2762: /* TODO: split into write_config/sync_config */
+2763: /* TODO: add config_dirty bitmap to drive sync_config */
+2764: int mpam_apply_config(struct mpam_component *comp, u16 partid,
+2765: 		      struct mpam_config *cfg, bool sync)
+2766: {
+2767: 	struct mpam_write_config_arg arg;
+2768: 	struct mpam_msc_ris *ris;
+2769: 	int idx;
+2770: 
+2771: 	lockdep_assert_cpus_held();
+2772: 
+2773: 	if (!sync) {
+2774: 		/* The partid is within the range of intPARTIDs */
+2775: 		WARN_ON_ONCE(partid >= resctrl_arch_get_num_closid(NULL));
+2776: 
+2777: 		if (!memcmp(&comp->cfg[partid], cfg, sizeof(*cfg)))
+2778: 			return 0;
+2779: 
+2780: 		comp->cfg[partid] = *cfg;
+2781: 	}
+2782: 
+2783: 	arg.comp = comp;
+2784: 	arg.partid = partid;
+2785: 	arg.sync = sync;
+2786: 
+2787: 	idx = srcu_read_lock(&mpam_srcu);
+2788: 	list_for_each_entry_rcu(ris, &comp->ris, comp_list) {
+2789: 		arg.ris = ris;
+2790: 		mutex_lock(&ris->msc->lock);
+2791: 		mpam_touch_msc(ris->msc, __write_config, &arg);
+2792: 		ris->in_reset_state = false;
+2793: 		mutex_unlock(&ris->msc->lock);
+2794: 	}
+2795: 	srcu_read_unlock(&mpam_srcu, idx);
+2796: 
+2797: 	return 0;
+2798: }
+
+=== fs/debugfs/file.c:1006-1046 ===
+1006: static ssize_t debugfs_read_file_cpumask(struct file *file,
+1007: 					 char __user *user_buf,
+1008: 					 size_t count, loff_t *ppos)
+1009: {
+1010: 	struct dentry *dentry = F_DENTRY(file);
+1011: 	struct cpumask *cpumask;
+1012: 	char *kernel_buf;
+1013: 	ssize_t ret;
+1014: 	int len;
+1015: 
+1016: 	ret = debugfs_file_get(dentry);
+1017: 	if (unlikely(ret))
+1018: 		return ret;
+1019: 
+1020: 	/* How long is a piece of string? */
+1021: 	kernel_buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+1022: 	if (!kernel_buf) {
+1023: 		ret = -ENOMEM;
+1024: 		goto kfree;
+1025: 	}
+1026: 
+1027: 	cpumask = (struct cpumask *)file->private_data;
+1028: 	len = scnprintf(kernel_buf, PAGE_SIZE,
+1029: 			"%*pb\n", cpumask_pr_args(cpumask));
+1030: 	if (len + 1 >= PAGE_SIZE) {
+1031: 		ret = -EIO;
+1032: 		goto debugfs_put;
+1033: 	}
+1034: 
+1035: 	ret = simple_read_from_buffer(user_buf, count, ppos, kernel_buf, len);
+1036: 
+1037: debugfs_put:
+1038: 	debugfs_file_put(dentry);
+1039: kfree:
+1040: 	kfree(kernel_buf);
+1041: 	return ret;
+1042: }
+1043: 
+1044: static const struct file_operations fops_cpumask_ro = {
+1045: 	.read =	debugfs_read_file_cpumask,
+1046: 	.open =	simple_open,
+
+=== fs/debugfs/inode.c:729-751 ===
+729: 	return end_creating(dentry);
+730: }
+731: EXPORT_SYMBOL_GPL(debugfs_create_symlink);
+732: 
+733: static void __debugfs_file_removed(struct dentry *dentry)
+734: {
+735: 	struct debugfs_fsdata *fsd;
+736: 
+737: 	/*
+738: 	 * Paired with the closing smp_mb() implied by a successful
+739: 	 * cmpxchg() in debugfs_file_get(): either
+740: 	 * debugfs_file_get() must see a dead dentry or we must see a
+741: 	 * debugfs_fsdata instance at ->d_fsdata here (or both).
+742: 	 */
+743: 	smp_mb();
+744: 	fsd = READ_ONCE(dentry->d_fsdata);
+745: 	if ((unsigned long)fsd & DEBUGFS_FSDATA_IS_REAL_FOPS_BIT)
+746: 		return;
+747: 	if (!refcount_dec_and_test(&fsd->active_users))
+748: 		wait_for_completion(&fsd->active_users_drained);
+749: }
+750: 
+751: static void remove_one(struct dentry *victim)
+
+=== fs/resctrl/rdtgroup.c:3884-3899 ===
+3884: 			   struct kernfs_node *new_parent, const char *new_name)
+3885: {
+3886: 	struct kernfs_node *kn_parent;
+3887: 	struct rdtgroup *new_prdtgrp;
+3888: 	struct rdtgroup *rdtgrp;
+3889: 	cpumask_var_t tmpmask;
+3890: 	int ret;
+3891: 
+3892: 	if (IS_ENABLED(CONFIG_ARM64_MPAM))
+3893: 		return -EPERM;
+3894: 
+3895: 	rdtgrp = kernfs_to_rdtgroup(kn);
+3896: 	new_prdtgrp = kernfs_to_rdtgroup(new_parent);
+3897: 	if (!rdtgrp || !new_prdtgrp)
+3898: 		return -ENOENT;
+3899: 
+
+=== fs/resctrl/rdtgroup.c:4289-4298 ===
+4289: void resctrl_exit(void)
+4290: {
+4291: 	debugfs_remove_recursive(debugfs_resctrl);
+4292: 	unregister_filesystem(&rdt_fs_type);
+4293: 	sysfs_remove_mount_point(fs_kobj, "resctrl");
+4294: 
+4295: 	resctrl_mon_resource_exit();
+4296: }

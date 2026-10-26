@@ -1,0 +1,9 @@
+主代理静态初查线索（候选，需 Astra 独立反证）：
+1. arch/arm64/mm/tlbid.c: nr_acpi_domain 统计不同 ID 个数，却按原始 target->domains[i] 索引分配为该个数的数组。稀疏正 ID 在 add_target 接受后可越界；负 s32 ID 仅做 >= max_id 校验也能进入索引。
+2. tlbid_data_init 的 max_id 是 u16，1 << 16 赋值为 0；nis/nos=16 时分配长度错误。需核对 field 范围。
+3. drivers/acpi/arm64/tlbid.c memcpy 基于 hdr->offset 和 hdr->nr_domain，未使用 end 校验；通用解析器仅检查固定头是否在 table 中，未校验间接 domain payload。
+4. __tlbip_addr_hi 用 PAGE_SHIFT；非 range TLBIP 注释声明 VA[55:12]，普通 __TLBI_VADDR 固定 >>12。64K/16K 下可能错误地址；range 编码需分开核实，不能一概断言。Arm 官方页面抓取失败；不要仅用镜像做一手依据。
+5. ID_AA64MMFR4_EL1 init 已增加，但 update_cpu_features 未看到同寄存器 check_update_ftr_reg；test_has_tlbid 忽略 scope 只看系统寄存器。异构与 late CPU 可能错启用。
+6. vTLBID 集成 arch/arm64/kvm/arm.c update_domain_map 使用未 alloc 的 cpumask_var_t new_cpus；CONFIG_CPUMASK_OFFSTACK=y 是指针。
+7. vTLBID kvm_arm_update_tlbid_map 中 int pdomain << offset 再赋 u64；offset>=32 可能 UB/丢失高位。
+请自行评估其他实质改动，以上不构成结论。本轮用户明确不运行测试，只做静态分析。

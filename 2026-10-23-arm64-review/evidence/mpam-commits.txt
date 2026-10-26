@@ -1,0 +1,31 @@
+26b0eaa72060b284bd44312a9609e25bf8493677 arm_mpam: Add intPARTID and reqPARTID support for narrow PARTID feature
+cb30664e92e80fb45f81de4d0d3bb107ebc2c23c arm_mpam: Refactor rmid to reqPARTID/PMG mapping
+44b22472388a3e246d6b50579e42c21172e5dc4d arm_mpam: Set INTERNAL as needed when setting MSC controls
+0286056835272c46db7ce44dee7b5aef185b3aa1 arm_mpam: Propagate control group config to sub-monitoring groups
+5b2ba68802c4c046ca997ae6469a19d951641790 fs/resctrl: Add rmid_entry state helpers
+d181cc9412ccb8a48c84d139deee28d4612e752e arm_mpam: Implement dynamic reqPARTID allocation for monitoring groups
+fd4560e6febe989618d43a2f218461ec5f4a55a5 fs/resctrl: Wire up rmid expansion and reclaim functions
+b4e402930686cab3c6e80538fc827d46f1a6f6dc arm64/mpam: Add mpam_sync_config() for dynamic rmid expansion
+863f2241b71ca4e10bda37c849b263fd55e02735 fs/resctrl: Prevent rmid parsing errors by flushing limbo on umount
+efc05cb8de88f752dea8c5ab891fb4b3791e7e92 arm_mpam: Disable reqPARTID expansion when Narrow-PARTID is unavailable
+ee7098fbc7b0f38b8838c19360fecd40de0da976 arm_mpam: Add MBWU counter scaling support
+5e436271c5d920e9bdb4f3538acd5e9d3e4e20de arm64/mpam: Fix wd boundary check and GENMASK range in percent-mbw conversion
+778c7889d10e967b0d847e92e8eccd320db65b17 arm64/mpam: Add HISI_HIP13 support
+19a6d76b3811c81483937e68b8c6ceccebf71bfb fs/resctrl: Introduce per-resource MBM enable check
+f193e049f4f2a2f8750f0b468ad539fbf028feca fs/resctrl: Add arch-specific MBM overflow setup helpers
+15c38b9ceea3ab31d4960da029aa56b7ea16af65 arm64/mpam: Add selective L2 MBM overflow checking
+6d130b806e355781bc5754ebf11472aa1e2534e0 arm64/mpam: Add MBM overflow handling for HIP13
+58310b452948cacf37a53cdae0618109385dc0b0 arm64/mpam: Allow zero-bit CPBM for L2 cache
+1bc688bd7fb3911c1eba90bd7ebedbd862dff675 arm64/mpam: Adapt SMMU IOMMU interface for Narrow PARTID support
+f3506bcf9c5560e64b96cc908737bc5235c66431 arm64/mpam: Add MBOPT (Memory Bandwidth Optimal) feature
+5363e34df3233541bc9836cbca33b69b47938422 resctrl: Remove unused mbm_core field from rdt_domain
+17e192641ecbf26c04f5c38639fe3014c1862f99 fs/resctrl: Introduce resctrl_arch_mbm_update() for arch-specific MBM event handling
+6b21ebc8cb3f51d2c4e551a339993d083935f5b9 arm64/mpam: Add MBM_TOTAL_EVENT configurability check
+0eff08a2e5436d9766688fcda274c123cd11155d debugfs: Add helpers for creating cpumask entries in debugfs
+cb17dafb1c6f947790e5c054aa4c3972050808cd arm64/mpam: Add debugfs entries to show the MSC/RIS the driver discovered
+778fe7d3477607c0b2f909497750415887315061 iommu/arm-smmu-v3: Add debug logging for MPAM STE configuration
+d462edab8277a4eecf6577c6d337645ba17e7d4a Revert "fs/resctrl: Re-allocate rmid for the monitor when migrating across control groups"
+767a8420df3f026c3f71af17d2e61b298f8c83d9 fs/resctrl: Fix iommu_group and kobject reference leaks
+96f69caf6a113706e50cfd600163ab14c28ce374 arm_mpam: Fix NULL pointer dereference after freeing comp->cfg
+43a672a6990938d41c44cf8d3ba583df96b6ef3a arm_mpam: Wait for SRCU grace period before destroying RIS
+63de741cd060223ce05d00bbe5c4335413b75482 arm_mpam: Fix percpu memory leak in __setup_ppi() error path

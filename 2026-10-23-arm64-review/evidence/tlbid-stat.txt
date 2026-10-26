@@ -1,0 +1,24 @@
+ arch/arm64/Kconfig                     |  29 +++
+ arch/arm64/configs/openeuler_defconfig |   1 +
+ arch/arm64/include/asm/cpu.h           |   2 +
+ arch/arm64/include/asm/cpufeature.h    |  19 ++
+ arch/arm64/include/asm/tlbflush.h      | 349 +++++++++++++++++++++++++++++----
+ arch/arm64/include/asm/tlbid.h         |  28 +++
+ arch/arm64/kernel/cpufeature.c         |  88 +++++++++
+ arch/arm64/kernel/cpuinfo.c            |   5 +
+ arch/arm64/kernel/smp.c                |   3 +
+ arch/arm64/mm/Kconfig                  |  10 +
+ arch/arm64/mm/Makefile                 |   1 +
+ arch/arm64/mm/context.c                |   9 +-
+ arch/arm64/mm/test_tlbid.c             | 178 +++++++++++++++++
+ arch/arm64/mm/tlbid.c                  | 341 ++++++++++++++++++++++++++++++++
+ arch/arm64/tools/cpucaps               |   4 +-
+ arch/arm64/tools/sysreg                |  66 ++++++-
+ drivers/acpi/arm64/Makefile            |   1 +
+ drivers/acpi/arm64/init.c              |   2 +
+ drivers/acpi/arm64/init.h              |   1 +
+ drivers/acpi/arm64/tlbid.c             | 105 ++++++++++
+ drivers/acpi/tables.c                  |   9 +
+ include/acpi/actbl2.h                  |  29 +++
+ include/linux/acpi.h                   |   1 +
+ 23 files changed, 1235 insertions(+), 46 deletions(-)

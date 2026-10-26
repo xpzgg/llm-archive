@@ -1,0 +1,6 @@
+idle restore / write IPI: irq_at=0, shadow=1, hardware=1
+idle restore / write IPI: irq_at=1, shadow=1, hardware=0
+idle restore / write IPI: irq_at=2, shadow=1, hardware=1
+owner offline: new_owner=3, shadows={2: 1, 3: 0}, hardware=0, expected=1
+owner removal race: IPI=-6, store=10 (false success)
+PASS: modeled counterexamples reproduced; no hardware execution claimed

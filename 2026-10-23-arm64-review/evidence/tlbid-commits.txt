@@ -1,0 +1,15 @@
+3acc35564e3c2ddd8d54ec3abaa4c7b6b427cbe8 arm64: cpufeature: Add ID_AA64MMFR4_EL1 handling
+059e01f0a63c8eb5f52cbb34598824ab9a8c69cd arm64: sysreg: Add layout for ID_AA64MMFR4_EL1
+32090d7ab1de578e938ba758606c62eabd73a9dd arm64: cpufeatures: Add missing ID_AA64MMFR4_EL1 to __read_sysreg_by_encoding()
+5360dc8503610dddf663353e0be4f6705f618078 arm64: sysreg: Update ID_AA64MMFR4_EL1 description
+cb4ddc6443eaaa3620b72a0b2dd1f18392584368 arm64: sysreg: Correct sign definitions for EIESB and DoubleLock
+d356a1b6ec5e478b0ccdfbeb966e8a9858d5b3fd arm64: cpufeature: Add SYSINSTR128 (128-bit System instructions) detection
+54b969b13247500ce3b18f1f1dc92b6781ced36e arm64: cpufeature: Add TLBID (Domain-based TLB Invalidation) detection
+2af4c40a55615339ab539794ec87b2d44da432e9 acpi: arm64: Parse TLBID and CPUs topology based on ACPI table
+0b6317098e893f7810db8c05f577333c4d9b93a5 arm64: Scan sparse table to select target TLBI domain
+3e13cb855c50d10c2737a752088986cedf59c81a arm64: Add kunit testsuit for TLBID related interfaces
+0d68e5cb3950f3896b0c1e9c572393be486a2860 arm64: mm: Track CPUs that a task has run on for TLBID optimization
+5468798756f2ece87f7b9753ad41c0c59f1257a4 arm64: tlbflush: Optimize flush_tlb_mm() by using TLBID
+e28c4375a213dc04638bfd082fa8b51b25f19970 arm64: tlbflush: Optimize flush_tlb_range() by using TLBIP
+a43893f89baa70c06e94dcc2d2636bb8c5901eb0 arm64: tlbflush: Optimize flush_tlb_page() by using TLBIP
+f025f5fa415f471d81e99cac830d8598095c8de6 arm64/defconfig: enable CONFIG_ARM64_TLBID

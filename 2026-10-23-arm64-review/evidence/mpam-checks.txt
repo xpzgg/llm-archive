@@ -1,0 +1,4 @@
+ROOT_MON_TAG_LOSS req=8, pmg=0: stored=0x8000000080000, effective=0x0
+ROOT_MON_TAG_LOSS req=0, pmg=1: stored=0x100000001, effective=0x0
+CLASS_DEBUGFS_UAF: class freed; class debugfs files not removed
+DEBUGFS_OOM_REF_LEAK: active_users after remove = 1

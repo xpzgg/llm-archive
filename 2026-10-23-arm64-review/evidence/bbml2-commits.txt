@@ -1,0 +1,24 @@
+74d2506720b20f7ad0f2bcc885310f36fcae9bfa arm64: Split kpti_install_ng_mappings()
+be67b8832a1e05cfaf08788613569e62ae059217 arm64: Avoid enabling KPTI unnecessarily
+894d268599bcb290183aeafcece5ad576e064cbb arm64: cpufeature: Display the set of cores with a feature
+51a4076ce428215d190f6818d6d1110127f7405a arm64: cpufeature: Introduce MATCH_ALL_EARLY_CPUS capability type
+7e19d74b6cc20f66991ee0fbd096bce31f212fd6 arm64: Add BBM Level 2 cpu feature
+e658dc8266d593d76193dd682e807622eabd0a29 arm64/mm: Elide tlbi in contpte_convert() under BBML2
+f4437e1b170838a8e895ea43ff02ce23e7130384 mm: pagewalk: assert write mmap lock only for walking the user page tables
+1182d6831a2fe741389b8d160fb2ebbfe4ce00e5 mm/pagewalk: split walk_page_range_novma() into kernel/user parts
+36ab2d3796d9c21d428e1bb38543dae1a169cfd7 arm64: Enable permission change on arm64 kernel block mappings
+56f1c1ef7258159392898a9f8658a5f40ef546b3 arm64: mm: support large block mapping when rodata=full
+4b054184701024dad35a41e8dfe077c18ae1356d arm64: mm: split linear mapping if BBML2 unsupported on secondary CPUs
+8e7f29ab1a4fda0af217fc14ccc233ea8decbc2c arm64: mm: Don't sleep in split_kernel_leaf_mapping() when in atomic context
+ef4d24d83c45e7420fd18f3d3d80a807f07d0462 arm64: mm: Optimize range_split_to_ptes()
+3a3f15498daf01541d5489585bf8d3a517b87357 arm64: mm: Tidy up force_pte_mapping()
+86f3933bdcb2ff00514bb97cacb8be02af39772c arm64/pageattr: Propagate return value from __change_memory_common
+a6e71bf50d927da9c46564b69ea8567638b602b1 arm64: mm: Simplify check in arch_kfence_init_pool()
+2c8c3b8fdd871f014fdc1c6697b4458ebef88510 arm64: mm: Fix rodata=full block mapping support for realm guests
+dfe0724243c7b740f3c5ea6ab7e0f482c417de13 arm64/mm: generalize PMD_PRESENT_INVALID for all levels
+ec05e5037ae9d804a541df44312f773b1702cbe6 arm64/mm: Rename pte_mkpresent() as pte_mkvalid()
+45d2c73251fae13173c0d89e5927fa13a12550ee arm64: mm: Handle invalid large leaf mappings correctly
+448e6ed3a15bc60c9b59cf1f9a31150a68976b02 arm64: sysreg: Add BBM_3
+410b3c16439503ca3a960218f48f859e813ead76 arm64: cpufeature: Rename BBML2_NOABORT as BBML3
+660028dc95e0ea44f3ad6dad4d4a327504e5ccc1 arm64: cpufeature: Detect BBML3 based on ID_AA64MMFR2_EL1.BBM
+96f9e98c2c3166e621137ab9b49f328b0835cc4b arm64: cpufeature: add HISI_HIP13 to BBML3 allow list
