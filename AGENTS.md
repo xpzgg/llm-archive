@@ -80,7 +80,6 @@ This repository is a personal technical archive. It contains long-lived notes, d
 | `notes/linux-kernel/general/` | Temporary or general kernel notes. Clean up or promote durable material when it becomes stable. |
 | `notes/chip-kernel/` | Specialized track: chip software–CPU / software–hardware co-design. Holds `chip-kernel-roadmap.md` (the capability roadmap) and cross-cutting topics: `platform-boot/` (boot, bring-up, reboot) and `computer-architecture/` (computer architecture study notes). |
 | `notes/ai-infra/` | AI infrastructure notes: `ascendc/`, `pytorch/`, `transformer/`, `vllm/`. |
-| `notes/known-concepts.md` | Mastery index: the L1 / L2 / L3 level reached per topic. Check it before explaining; skip what the level already covers and update it after a level is finished. |
 
 When editing `notes/`, follow the local rule: explain What, Why, How, and So What as needed, but do not force every article into a rigid template.
 
