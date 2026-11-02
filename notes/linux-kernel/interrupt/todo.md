@@ -3,3 +3,6 @@
 - [ ] PREEMPT_RT 下中断线程化的完整行为
 - [ ] ITS LPI 的 pending table 在 power management 中的保存/恢复流程
 - [ ] irqfd（KVM 中断注入）的完整路径
+- [ ] 搞清楚 arm64 上各种栈的区别：用户栈、进程内核栈（含栈顶 `pt_regs`）、per-CPU IRQ 栈、overflow 栈、SDEI 栈；各自何时使用、怎么切换、unwinder 如何跨栈（来源：LKD 第 7 章中断栈）
+- [ ] 搞清楚中断与异常的区别：同步/异步、arm64 异常模型（同步异常、IRQ、FIQ、SError）与 Linux 里"中断"的对应关系（来源：LKD 第 7 章）
+- [ ] 学习 arm64 异常向量表的分类：4 类事件（同步异常 / IRQ / FIQ / SError）× 4 种来源（当前 EL 用 SP0 / 当前 EL 用 SPx / 低 EL AArch64 / 低 EL AArch32）共 16 个槽位；同步异常如何靠 `ESR_EL1` 的 EC 字段再细分（缺页、`svc`、未定义指令等）；各类事件在 Linux 里分别走到哪些入口函数（来源：LKD 第 7 章，和"中断与异常的区别"那条一起学）
