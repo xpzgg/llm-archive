@@ -1,0 +1,36 @@
+From 8d2d15fade1862c6da7dd9a6938ee17dac44a10e Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:03 +0800
+Subject: [PATCH v3 11/18] arm64: mm: Show PBHA bit 59 as PBHA0 in ptdump
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Show PBHA bit 59 as PBHA0 in ptdump to better debug kernel page entries.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ arch/arm64/mm/ptdump.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/mm/ptdump.c b/arch/arm64/mm/ptdump.c
+index dcf2eaa1b244..150d8e83d427 100644
+--- a/arch/arm64/mm/ptdump.c
++++ b/arch/arm64/mm/ptdump.c
+@@ -147,6 +147,11 @@ static const struct prot_bits pte_bits[] = {
+ 		.val	= PTE_GP,
+ 		.set	= "GP",
+ 		.clear	= "  ",
++	}, {
++		.mask	= PTE_PBHA0,
++		.val	= PTE_PBHA0,
++		.set	= "PBHA0",
++		.clear	= "  ",
+ 	}, {
+ 		.mask	= PTE_ATTRINDX_MASK,
+ 		.val	= PTE_ATTRINDX(MT_DEVICE_nGnRnE),

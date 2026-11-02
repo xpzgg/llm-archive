@@ -1,0 +1,113 @@
+From 9c6911605fe283e4a810d23b71a28f2ec4530b6b Mon Sep 17 00:00:00 2001
+From: Jiacheng Yu <yujiacheng3@huawei.com>
+Date: Mon, 2 Nov 2026 05:58:53 -0800
+Subject: [PATCH v3 00/18] MOC bypass cache
+
+The MOC (MemoryOnChip) bypass cache feature uses the Arm Page Based Hardware
+Attributes (PBHA, FEAT_HPDS2) to describe per-mapping performance hints.
+MOC memory is not cached in the system cache, so the OS has to be told which
+pages may be mapped with the MOC attribute.
+
+This series adds:
+ - stage1 PBHA support, discovered from the device tree or from the EFI stub
+ - KVM stage2 support, including the VTCR_EL2.PBHA override mask
+ - page based control: PROT_PBHA_BIT0, VM_PBHA_BIT0, prctl and
+   /proc/<pid>/pbha_bit0
+ - the pbha= boot parameter and the MOC mode plumbing in the EFI stub
+
+Based on OLK-6.6.
+
+Changes in v3:
+ - dt-bindings: update the six stale references to arm/cpu.yaml, add the
+   maintainers entry and fix the description
+ - fix the for-loop style in the PBHA parsing code
+ - move pbha.rst to Documentation/arch/arm64/
+ - use a free vm_flags bit for VM_PBHA_BIT0 and document the p0 mnemonic
+ - drop the set_huge_pte_at() find_vma() lookup; the hint is carried by
+   vm_page_prot
+ - rewrite a live THP pmd through pmdp_invalidate_ad()
+ - take an mm reference in pbha_bit0_read()
+ - add a .hugetlb_entry callback so /proc/<pid>/pbha_bit0 and prctl update
+   hugetlb mappings as well
+ - limit the global-init flagging to current->mm and refresh vm_page_prot
+ - base the "nothing to do" decision on the actual VMA state instead of
+   mm->def_flags
+ - reject a NULL or unrecognized pbha= value
+
+
+Fanhua Li (2):
+  arm64: mm: Set PBHA0 bit for VM_PBHA_BIT0
+  arm64: mm: Introduce procfs interface to update PBHA0 bit
+
+James Morse (7):
+  KVM: arm64: Detect and enable PBHA for stage2
+  dt-bindings: Rename the description of cpu nodes cpu.yaml
+  dt-bindings: arm: Add binding for Page Based Hardware Attributes
+  arm64: cpufeature: Enable PBHA bits for stage1
+  arm64: mm: Add pgprot_pbha() to allow drivers to request PBHA values
+  KVM: arm64: Configure PBHA bits for stage2
+  Documentation: arm64: Describe the support and expectations for PBHA
+
+Ma Wupeng (9):
+  arm64: cpufeature: Enable PBHA for stage1 early via FDT
+  arm64: mm: Detect and enable PBHA bit0 at early startup
+  arm64: mm: Update kernel pte entries if pbha bit0 enabled
+  arm64: mm: Show PBHA bit 59 as PBHA0 in ptdump
+  arm64: mm: Introduce VM_PBHA_BIT0 to enable pbha bit0 for single vma
+  arm64: mm: Set flag VM_PBHA_BIT0 for global init task
+  arm64: mm: Introduce prctl to control pbha behavior
+  arm64: mm: Introduce kernel param pbha
+  openeuler: configs: arm64: Enable PBHA by default
+
+ .../admin-guide/kernel-parameters.txt         |   7 +
+ Documentation/admin-guide/mm/pagemap.rst      |   4 +-
+ Documentation/arch/arm64/index.rst            |   1 +
+ Documentation/arch/arm64/pbha.rst             |  87 +++
+ .../devicetree/bindings/arm/cpu.yaml          | 578 ++++++++++++++++
+ .../devicetree/bindings/arm/cpus.yaml         | 622 ++----------------
+ .../devicetree/bindings/cpu/cpu-capacity.txt  |   2 +-
+ .../devicetree/bindings/cpu/cpu-topology.txt  |   2 +-
+ .../devicetree/bindings/cpu/idle-states.yaml  |   2 +-
+ .../interrupt-controller/apple,aic.yaml       |   2 +-
+ .../interrupt-controller/apple,aic2.yaml      |   2 +-
+ .../interrupt-controller/arm,gic-v3.yaml      |   2 +-
+ Documentation/filesystems/proc.rst            |   1 +
+ arch/arm64/Kconfig                            |  19 +
+ arch/arm64/configs/openeuler_defconfig        |   1 +
+ arch/arm64/include/asm/cpufeature.h           |  15 +
+ arch/arm64/include/asm/kvm_arm.h              |   1 +
+ arch/arm64/include/asm/kvm_pgtable.h          |   9 +
+ arch/arm64/include/asm/mman.h                 |   7 +
+ arch/arm64/include/asm/pgtable-hwdef.h        |   6 +
+ arch/arm64/include/asm/pgtable.h              |  26 +
+ arch/arm64/include/asm/setup.h                |   1 +
+ arch/arm64/include/uapi/asm/mman.h            |   1 +
+ arch/arm64/kernel/cpufeature.c                | 258 ++++++++
+ arch/arm64/kernel/head.S                      |   3 +
+ arch/arm64/kernel/image-vars.h                |   2 +
+ arch/arm64/kvm/hyp/pgtable.c                  |  16 +-
+ arch/arm64/mm/fixmap.c                        |   2 +
+ arch/arm64/mm/mmap.c                          |   3 +
+ arch/arm64/mm/mmu.c                           |  13 +-
+ arch/arm64/mm/ptdump.c                        |   5 +
+ arch/arm64/tools/cpucaps                      |   6 +-
+ .../firmware/efi/libstub/efi-stub-helper.c    |   3 +
+ drivers/firmware/efi/libstub/fdt.c            |  52 ++
+ drivers/soc/hisilicon/Makefile                |   1 +
+ drivers/soc/hisilicon/pbha.c                  | 265 ++++++++
+ fs/proc/base.c                                | 124 ++++
+ fs/proc/task_mmu.c                            |  18 +
+ include/linux/mm.h                            |   8 +-
+ include/linux/pbha.h                          |  95 +++
+ include/uapi/asm-generic/mman-common.h        |   1 +
+ include/uapi/linux/prctl.h                    |   1 +
+ kernel/sys.c                                  |  10 +
+ mm/memory.c                                   |   4 +
+ mm/vmalloc.c                                  |   4 +
+ tools/include/uapi/asm-generic/mman-common.h  |   1 +
+ 46 files changed, 1727 insertions(+), 566 deletions(-)
+ create mode 100644 Documentation/arch/arm64/pbha.rst
+ create mode 100644 Documentation/devicetree/bindings/arm/cpu.yaml
+ create mode 100644 drivers/soc/hisilicon/pbha.c
+ create mode 100644 include/linux/pbha.h
+
