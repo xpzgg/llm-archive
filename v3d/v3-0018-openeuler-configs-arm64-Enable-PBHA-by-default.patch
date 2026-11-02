@@ -1,0 +1,32 @@
+From 9c6911605fe283e4a810d23b71a28f2ec4530b6b Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:10 +0800
+Subject: [PATCH v3 18/18] openeuler: configs: arm64: Enable PBHA by default
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Enable feature PBHA for arm64 by default.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ arch/arm64/configs/openeuler_defconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index 007158aed18e..7a93e398be06 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -560,6 +560,7 @@ CONFIG_ARM64_USE_LSE_ATOMICS=y
+ CONFIG_ARM64_PMEM=y
+ CONFIG_ARM64_RAS_EXTN=y
+ CONFIG_ARM64_CNP=y
++CONFIG_ARM64_PBHA=y
+ # end of ARMv8.2 architectural features
+ 
+ #

@@ -1,0 +1,131 @@
+From e8cd1c3860fcb061af27ca0acedb4bfeb9356399 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 29 Oct 2026 17:54:54 +0800
+Subject: [PATCH v3 02/18] dt-bindings: Rename the description of cpu nodes
+ cpu.yaml
+
+maillist inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+Reference: https://lore.kernel.org/all/20211015161416.2196-1-james.morse@arm.com/t/#u
+
+--------------------------------
+
+The cpus.yaml file describes the cpu nodes, not the cpus node.
+Rename it to allow integration properties of all the cpus to be described
+in the cpus node.
+
+Also update the in-tree references to the renamed file. They describe CPU
+node properties, so they must point at cpu.yaml; left alone they would
+resolve to the cpus container node added later in this series.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v3:
+ - update the six references to the CPU node binding, from arm/cpus.yaml
+   to arm/cpu.yaml
+---
+ Documentation/devicetree/bindings/arm/{cpus.yaml => cpu.yaml}   | 2 +-
+ Documentation/devicetree/bindings/cpu/cpu-capacity.txt          | 2 +-
+ Documentation/devicetree/bindings/cpu/cpu-topology.txt          | 2 +-
+ Documentation/devicetree/bindings/cpu/idle-states.yaml          | 2 +-
+ .../devicetree/bindings/interrupt-controller/apple,aic.yaml     | 2 +-
+ .../devicetree/bindings/interrupt-controller/apple,aic2.yaml    | 2 +-
+ .../devicetree/bindings/interrupt-controller/arm,gic-v3.yaml    | 2 +-
+ 7 files changed, 7 insertions(+), 7 deletions(-)
+ rename Documentation/devicetree/bindings/arm/{cpus.yaml => cpu.yaml} (99%)
+
+diff --git a/Documentation/devicetree/bindings/arm/cpus.yaml b/Documentation/devicetree/bindings/arm/cpu.yaml
+similarity index 99%
+rename from Documentation/devicetree/bindings/arm/cpus.yaml
+rename to Documentation/devicetree/bindings/arm/cpu.yaml
+index 0d17cbad9778..95d3c2305676 100644
+--- a/Documentation/devicetree/bindings/arm/cpus.yaml
++++ b/Documentation/devicetree/bindings/arm/cpu.yaml
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ %YAML 1.2
+ ---
+-$id: http://devicetree.org/schemas/arm/cpus.yaml#
++$id: http://devicetree.org/schemas/arm/cpu.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+ title: ARM CPUs
+diff --git a/Documentation/devicetree/bindings/cpu/cpu-capacity.txt b/Documentation/devicetree/bindings/cpu/cpu-capacity.txt
+index f28e1adad428..e910e045605a 100644
+--- a/Documentation/devicetree/bindings/cpu/cpu-capacity.txt
++++ b/Documentation/devicetree/bindings/cpu/cpu-capacity.txt
+@@ -235,4 +235,4 @@ cpus {
+ ===========================================
+ 
+ [1] ARM Linux Kernel documentation - CPUs bindings
+-    Documentation/devicetree/bindings/arm/cpus.yaml
++    Documentation/devicetree/bindings/arm/cpu.yaml
+diff --git a/Documentation/devicetree/bindings/cpu/cpu-topology.txt b/Documentation/devicetree/bindings/cpu/cpu-topology.txt
+index 9bd530a35d14..72a59c42b14b 100644
+--- a/Documentation/devicetree/bindings/cpu/cpu-topology.txt
++++ b/Documentation/devicetree/bindings/cpu/cpu-topology.txt
+@@ -545,7 +545,7 @@ Example 3: HiFive Unleashed (RISC-V 64 bit, 4 core system)
+ };
+ ===============================================================================
+ [1] ARM Linux kernel documentation
+-    Documentation/devicetree/bindings/arm/cpus.yaml
++    Documentation/devicetree/bindings/arm/cpu.yaml
+ [2] Devicetree NUMA binding description
+     Documentation/devicetree/bindings/numa.txt
+ [3] RISC-V Linux kernel documentation
+diff --git a/Documentation/devicetree/bindings/cpu/idle-states.yaml b/Documentation/devicetree/bindings/cpu/idle-states.yaml
+index b3a5356f9916..a4ec0fa6ab52 100644
+--- a/Documentation/devicetree/bindings/cpu/idle-states.yaml
++++ b/Documentation/devicetree/bindings/cpu/idle-states.yaml
+@@ -247,7 +247,7 @@ description: |+
+   ===========================================
+ 
+   [1] ARM Linux Kernel documentation - CPUs bindings
+-      Documentation/devicetree/bindings/arm/cpus.yaml
++      Documentation/devicetree/bindings/arm/cpu.yaml
+ 
+   [2] ARM Linux Kernel documentation - PSCI bindings
+       Documentation/devicetree/bindings/arm/psci.yaml
+diff --git a/Documentation/devicetree/bindings/interrupt-controller/apple,aic.yaml b/Documentation/devicetree/bindings/interrupt-controller/apple,aic.yaml
+index 698588e9aa86..21e322feb23b 100644
+--- a/Documentation/devicetree/bindings/interrupt-controller/apple,aic.yaml
++++ b/Documentation/devicetree/bindings/interrupt-controller/apple,aic.yaml
+@@ -92,7 +92,7 @@ properties:
+           cpus:
+             description:
+               Should be a list of phandles to CPU nodes (as described in
+-              Documentation/devicetree/bindings/arm/cpus.yaml).
++              Documentation/devicetree/bindings/arm/cpu.yaml).
+ 
+         required:
+           - apple,fiq-index
+diff --git a/Documentation/devicetree/bindings/interrupt-controller/apple,aic2.yaml b/Documentation/devicetree/bindings/interrupt-controller/apple,aic2.yaml
+index 2bde6cc6fe0a..8059d5231f7f 100644
+--- a/Documentation/devicetree/bindings/interrupt-controller/apple,aic2.yaml
++++ b/Documentation/devicetree/bindings/interrupt-controller/apple,aic2.yaml
+@@ -95,7 +95,7 @@ properties:
+             $ref: /schemas/types.yaml#/definitions/phandle-array
+             description:
+               Should be a list of phandles to CPU nodes (as described in
+-              Documentation/devicetree/bindings/arm/cpus.yaml).
++              Documentation/devicetree/bindings/arm/cpu.yaml).
+ 
+         required:
+           - apple,fiq-index
+diff --git a/Documentation/devicetree/bindings/interrupt-controller/arm,gic-v3.yaml b/Documentation/devicetree/bindings/interrupt-controller/arm,gic-v3.yaml
+index 72e70f9d4b4a..9540cfc705eb 100644
+--- a/Documentation/devicetree/bindings/interrupt-controller/arm,gic-v3.yaml
++++ b/Documentation/devicetree/bindings/interrupt-controller/arm,gic-v3.yaml
+@@ -154,7 +154,7 @@ properties:
+               maxItems: 1
+             description:
+               Should be a list of phandles to CPU nodes (as described in
+-              Documentation/devicetree/bindings/arm/cpus.yaml).
++              Documentation/devicetree/bindings/arm/cpu.yaml).
+ 
+         required:
+           - affinity
