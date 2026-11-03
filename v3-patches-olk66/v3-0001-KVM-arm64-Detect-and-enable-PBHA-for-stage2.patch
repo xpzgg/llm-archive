@@ -1,7 +1,8 @@
 From 7bea7cb1f4ed4ebad81d2476e1e0907c620fc94a Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:53 +0800
-Subject: [PATCH v3 01/18] KVM: arm64: Detect and enable PBHA for stage2
+Subject: [PATCH OLK-6.6 v3 01/18] KVM: arm64: Detect and enable PBHA for
+ stage2
 
 maillist inclusion
 category: feature

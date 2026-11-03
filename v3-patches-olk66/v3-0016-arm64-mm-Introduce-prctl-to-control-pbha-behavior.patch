@@ -1,7 +1,8 @@
 From 0cfce2486f265a9c580e78254f0453c26c7253cf Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:08 +0800
-Subject: [PATCH v3 16/18] arm64: mm: Introduce prctl to control pbha behavior
+Subject: [PATCH OLK-6.6 v3 16/18] arm64: mm: Introduce prctl to control pbha
+ behavior
 
 hulk inclusion
 category: feature

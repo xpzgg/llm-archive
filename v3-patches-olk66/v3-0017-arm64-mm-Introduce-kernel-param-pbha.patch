@@ -1,7 +1,7 @@
 From 5757740de29d54bf31d9298f27749b772fc3b7f8 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:09 +0800
-Subject: [PATCH v3 17/18] arm64: mm: Introduce kernel param pbha
+Subject: [PATCH OLK-6.6 v3 17/18] arm64: mm: Introduce kernel param pbha
 
 hulk inclusion
 category: feature

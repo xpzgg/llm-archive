@@ -1,8 +1,8 @@
 From ded79fca46132f75b1009a53ad30f93fa12ba4ac Mon Sep 17 00:00:00 2001
 From: Fanhua Li <lifanhua5@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:06 +0800
-Subject: [PATCH v3 14/18] arm64: mm: Introduce procfs interface to update
- PBHA0 bit
+Subject: [PATCH OLK-6.6 v3 14/18] arm64: mm: Introduce procfs interface to
+ update PBHA0 bit
 
 hulk inclusion
 category: feature

@@ -1,8 +1,8 @@
 From 4d12e5a001e8e83995d7828f93347dde710db192 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:04 +0800
-Subject: [PATCH v3 12/18] arm64: mm: Introduce VM_PBHA_BIT0 to enable pbha
- bit0 for single vma
+Subject: [PATCH OLK-6.6 v3 12/18] arm64: mm: Introduce VM_PBHA_BIT0 to enable
+ pbha bit0 for single vma
 
 hulk inclusion
 category: feature

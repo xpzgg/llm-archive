@@ -1,7 +1,7 @@
 From 9c6911605fe283e4a810d23b71a28f2ec4530b6b Mon Sep 17 00:00:00 2001
 From: Jiacheng Yu <yujiacheng3@huawei.com>
-Date: Mon, 2 Nov 2026 05:58:53 -0800
-Subject: [PATCH v3 00/18] MOC bypass cache
+Date: Mon, 2 Nov 2026 17:09:32 -0800
+Subject: [PATCH OLK-6.6 v3 00/18] MOC bypass cache
 
 The MOC (MemoryOnChip) bypass cache feature uses the Arm Page Based Hardware
 Attributes (PBHA, FEAT_HPDS2) to describe per-mapping performance hints.

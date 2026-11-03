@@ -1,8 +1,8 @@
 From 4d880073eac17a75eb54b0e0027d2f84f3807104 Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:59 +0800
-Subject: [PATCH v3 07/18] Documentation: arm64: Describe the support and
- expectations for PBHA
+Subject: [PATCH OLK-6.6 v3 07/18] Documentation: arm64: Describe the support
+ and expectations for PBHA
 
 maillist inclusion
 category: feature

@@ -1,8 +1,8 @@
 From a7781f13c9e9fb59f513e5b02205df0685263a7c Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:07 +0800
-Subject: [PATCH v3 15/18] arm64: mm: Set flag VM_PBHA_BIT0 for global init
- task
+Subject: [PATCH OLK-6.6 v3 15/18] arm64: mm: Set flag VM_PBHA_BIT0 for global
+ init task
 
 hulk inclusion
 category: feature

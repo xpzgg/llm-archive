@@ -1,7 +1,7 @@
 From 278ea6e051f89c57d737fa84860ec13b735397d5 Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:58 +0800
-Subject: [PATCH v3 06/18] KVM: arm64: Configure PBHA bits for stage2
+Subject: [PATCH OLK-6.6 v3 06/18] KVM: arm64: Configure PBHA bits for stage2
 
 maillist inclusion
 category: feature

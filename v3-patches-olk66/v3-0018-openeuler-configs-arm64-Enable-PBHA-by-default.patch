@@ -1,7 +1,8 @@
 From 9c6911605fe283e4a810d23b71a28f2ec4530b6b Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:10 +0800
-Subject: [PATCH v3 18/18] openeuler: configs: arm64: Enable PBHA by default
+Subject: [PATCH OLK-6.6 v3 18/18] openeuler: configs: arm64: Enable PBHA by
+ default
 
 hulk inclusion
 category: feature

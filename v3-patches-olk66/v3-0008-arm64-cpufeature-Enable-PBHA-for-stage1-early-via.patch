@@ -1,8 +1,8 @@
 From b5d6a3f0782913358dbecffacea6c557ef2d6921 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:00 +0800
-Subject: [PATCH v3 08/18] arm64: cpufeature: Enable PBHA for stage1 early via
- FDT
+Subject: [PATCH OLK-6.6 v3 08/18] arm64: cpufeature: Enable PBHA for stage1
+ early via FDT
 
 hulk inclusion
 category: feature

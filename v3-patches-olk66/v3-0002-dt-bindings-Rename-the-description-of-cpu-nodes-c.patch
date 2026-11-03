@@ -1,8 +1,8 @@
 From e8cd1c3860fcb061af27ca0acedb4bfeb9356399 Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:54 +0800
-Subject: [PATCH v3 02/18] dt-bindings: Rename the description of cpu nodes
- cpu.yaml
+Subject: [PATCH OLK-6.6 v3 02/18] dt-bindings: Rename the description of cpu
+ nodes cpu.yaml
 
 maillist inclusion
 category: feature

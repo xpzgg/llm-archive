@@ -1,7 +1,7 @@
 From a4e2fd52932b6b84b05a11b772b67008ef032abe Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:55 +0800
-Subject: [PATCH v3 03/18] dt-bindings: arm: Add binding for Page Based
+Subject: [PATCH OLK-6.6 v3 03/18] dt-bindings: arm: Add binding for Page Based
  Hardware Attributes
 
 maillist inclusion
