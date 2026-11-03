@@ -1,7 +1,7 @@
-From 9c6911605fe283e4a810d23b71a28f2ec4530b6b Mon Sep 17 00:00:00 2001
+From 263848c0329527f75709b20ac4dde7589b9eef63 Mon Sep 17 00:00:00 2001
 From: Jiacheng Yu <yujiacheng3@huawei.com>
-Date: Mon, 2 Nov 2026 17:09:32 -0800
-Subject: [PATCH OLK-6.6 v3 00/18] MOC bypass cache
+Date: Mon, 2 Nov 2026 22:35:43 -0800
+Subject: [PATCH OLK-6.6 v4 00/18] MOC bypass cache
 
 The MOC (MemoryOnChip) bypass cache feature uses the Arm Page Based Hardware
 Attributes (PBHA, FEAT_HPDS2) to describe per-mapping performance hints.
@@ -17,6 +17,10 @@ This series adds:
 
 Based on OLK-6.6.
 
+Changes in v4:
+ - restore %ld when printing the static key state; %d broke the aarch64
+   build with -Werror=format
+
 Changes in v3:
  - dt-bindings: update the six stale references to arm/cpu.yaml, add the
    maintainers entry and fix the description
@@ -29,7 +33,7 @@ Changes in v3:
  - take an mm reference in pbha_bit0_read()
  - add a .hugetlb_entry callback so /proc/<pid>/pbha_bit0 and prctl update
    hugetlb mappings as well
- - limit the global-init flagging to current->mm and refresh vm_page_prot
+ - limit the global-init flagging to current->mm
  - base the "nothing to do" decision on the actual VMA state instead of
    mm->def_flags
  - reject a NULL or unrecognized pbha= value
@@ -98,14 +102,14 @@ Ma Wupeng (9):
  fs/proc/base.c                                | 124 ++++
  fs/proc/task_mmu.c                            |  18 +
  include/linux/mm.h                            |   8 +-
- include/linux/pbha.h                          |  95 +++
+ include/linux/pbha.h                          |  93 +++
  include/uapi/asm-generic/mman-common.h        |   1 +
  include/uapi/linux/prctl.h                    |   1 +
  kernel/sys.c                                  |  10 +
  mm/memory.c                                   |   4 +
  mm/vmalloc.c                                  |   4 +
  tools/include/uapi/asm-generic/mman-common.h  |   1 +
- 46 files changed, 1727 insertions(+), 566 deletions(-)
+ 46 files changed, 1725 insertions(+), 566 deletions(-)
  create mode 100644 Documentation/arch/arm64/pbha.rst
  create mode 100644 Documentation/devicetree/bindings/arm/cpu.yaml
  create mode 100644 drivers/soc/hisilicon/pbha.c

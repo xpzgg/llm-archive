@@ -1,7 +1,7 @@
-From bebc28a35ddeadd182fdc546e7ed1d8a938b0bb9 Mon Sep 17 00:00:00 2001
+From eee23a9af68da6eb7e42d532beab2ac43d2549fe Mon Sep 17 00:00:00 2001
 From: Fanhua Li <lifanhua5@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:05 +0800
-Subject: [PATCH OLK-6.6 v3 13/18] arm64: mm: Set PBHA0 bit for VM_PBHA_BIT0
+Subject: [PATCH OLK-6.6 v4 13/18] arm64: mm: Set PBHA0 bit for VM_PBHA_BIT0
 
 hulk inclusion
 category: feature

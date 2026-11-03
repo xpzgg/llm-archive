@@ -1,7 +1,7 @@
-From 077307d540a60f8543dbdb7566440d4964bd0c25 Mon Sep 17 00:00:00 2001
+From 985279f470a9e7a9f7984aa6ad43801183839871 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:02 +0800
-Subject: [PATCH OLK-6.6 v3 10/18] arm64: mm: Update kernel pte entries if pbha
+Subject: [PATCH OLK-6.6 v4 10/18] arm64: mm: Update kernel pte entries if pbha
  bit0 enabled
 
 hulk inclusion

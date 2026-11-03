@@ -1,7 +1,7 @@
-From 5757740de29d54bf31d9298f27749b772fc3b7f8 Mon Sep 17 00:00:00 2001
+From 0514833de00e0602287c94125c4e092a5ad06670 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:09 +0800
-Subject: [PATCH OLK-6.6 v3 17/18] arm64: mm: Introduce kernel param pbha
+Subject: [PATCH OLK-6.6 v4 17/18] arm64: mm: Introduce kernel param pbha
 
 hulk inclusion
 category: feature
@@ -22,9 +22,11 @@ Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
 Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
 Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
 ---
+Changes in v4:
+ - restore %ld for the static key state; %d broke the aarch64 build
+
 Changes in v3:
  - reject a NULL or unrecognized pbha= value
- - print the static key state with %d
 ---
  .../admin-guide/kernel-parameters.txt         |  7 ++++
  .../firmware/efi/libstub/efi-stub-helper.c    |  3 ++
@@ -94,7 +96,7 @@ index e304a36cf5e1..19f3a17aade6 100644
  				 &moc_mode);
  	if (efi_status != EFI_SUCCESS)
 diff --git a/drivers/soc/hisilicon/pbha.c b/drivers/soc/hisilicon/pbha.c
-index 5de5dbb89b6d..380745616167 100644
+index 5de5dbb89b6d..1385f08a9cdc 100644
 --- a/drivers/soc/hisilicon/pbha.c
 +++ b/drivers/soc/hisilicon/pbha.c
 @@ -19,9 +19,10 @@
@@ -142,14 +144,14 @@ index 5de5dbb89b6d..380745616167 100644
 +	}
 +
 +	if (static_branch_likely(&pbha_bit0_enabled))
-+		pr_info("pbha bit_0 enabled, kernel: %d\n",
++		pr_info("pbha bit_0 enabled, kernel: %ld\n",
 +			static_branch_likely(&pbha_bit0_kernel_enabled));
 +
 +	return 0;
 +}
 +early_param("pbha", setup_pbha);
 diff --git a/include/linux/pbha.h b/include/linux/pbha.h
-index d03a29cc001a..d5bebb324899 100644
+index 53dbb2ff01f3..a2f6acf00885 100644
 --- a/include/linux/pbha.h
 +++ b/include/linux/pbha.h
 @@ -20,19 +20,22 @@
@@ -185,6 +187,6 @@ index d03a29cc001a..d5bebb324899 100644
 +	/* global init task will update pbha bit0 iff kernel can do this */
  	if (unlikely(is_global_init(current)) && vma->vm_mm == current->mm &&
 +	    static_branch_unlikely(&pbha_bit0_kernel_enabled) &&
- 	    !(vma->vm_flags & VM_PBHA_BIT0)) {
+ 	    !(vma->vm_flags & VM_PBHA_BIT0))
  		ACCESS_PRIVATE(vma, __vm_flags) |= VM_PBHA_BIT0;
- 		vma_set_page_prot(vma);
+ 

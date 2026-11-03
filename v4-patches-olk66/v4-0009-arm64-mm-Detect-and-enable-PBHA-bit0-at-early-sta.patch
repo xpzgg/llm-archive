@@ -1,7 +1,7 @@
-From 32baceb3c329bfd5d8b94e2c2444a6553c299265 Mon Sep 17 00:00:00 2001
+From d6304f49b6b8d999a980ef4c7104ecc96ecd2597 Mon Sep 17 00:00:00 2001
 From: Ma Wupeng <mawupeng1@huawei.com>
 Date: Thu, 29 Oct 2026 17:55:01 +0800
-Subject: [PATCH OLK-6.6 v3 09/18] arm64: mm: Detect and enable PBHA bit0 at
+Subject: [PATCH OLK-6.6 v4 09/18] arm64: mm: Detect and enable PBHA bit0 at
  early startup
 
 hulk inclusion

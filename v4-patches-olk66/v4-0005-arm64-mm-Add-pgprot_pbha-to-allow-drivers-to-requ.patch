@@ -1,7 +1,7 @@
 From b1e8af724113fda8529ec7492f5bb6ac743cf2b8 Mon Sep 17 00:00:00 2001
 From: James Morse <james.morse@arm.com>
 Date: Thu, 29 Oct 2026 17:54:57 +0800
-Subject: [PATCH OLK-6.6 v3 05/18] arm64: mm: Add pgprot_pbha() to allow
+Subject: [PATCH OLK-6.6 v4 05/18] arm64: mm: Add pgprot_pbha() to allow
  drivers to request PBHA values
 
 maillist inclusion
