@@ -1,0 +1,111 @@
+{
+  "data_status": "模拟示例，非实际采样、评审或验证记录；用于展示分析过程，正式提交前应以真实记录替换",
+  "sample_basis": "假设回看30份已结单材料，每例只归入一个主要定位延迟原因；同一时段不重复归因",
+  "time_unit": "工作时段内经过小时；包括分析占用、复现运行和协同等待；不是工程师工时，也不是总定位时长",
+  "rpn_threshold": 300,
+  "confirmation_share_threshold": 0.1,
+  "confirmation_rule": "有对应材料支持该原因造成了追加工作，且累计可归因延迟占比至少10%；仅为本示例判据",
+  "scales": {
+    "S": "严重度：按该原因的单例平均可归因延迟分档；≤2h=2，(2,4]h=4，(4,8]h=6，(8,16]h=8，>16h=10",
+    "O": "发生度：按主要延迟原因在30例中的占比分档；≤5%=2，(5,10]%=4，(10,20]%=6，(20,30]%=8，>30%=10",
+    "D": "初诊识别难度，经验赋分：清单直接发现=2；版本/输入核验发现=4；单份日志或栈可定位=6；需跨CPU/多记录比对=8；需跨团队证据或再次定向取证=10"
+  },
+  "causes": [
+    {
+      "id": "F1",
+      "name": "等锁链靠人工跨CPU还原",
+      "S": 8, "O": 8, "D": 8,
+      "d_basis": "跨CPU/任务栈与锁对象逐项比对",
+      "delays_h": [8, 10, 12, 14, 10, 12, 14, 16],
+      "platforms": ["硅片", "硅片", "硅片", "FPGA", "FPGA", "FPGA", "FPGA", "ESL"],
+      "symptoms": ["Lock", "Lock", "Lock", "Lock", "Lock", "Lock", "Lock", "Lock"],
+      "confirmation_content": "逐CPU翻栈、查锁对象\n是否造成重复分析",
+      "confirmation_method": "旧dump命令\n与结单记录对照",
+      "confirmation_standard": "重复查栈有记录\n延迟占比≥10%",
+      "example_evidence": "示例设定：命令记录反复查看相同CPU/锁地址，结单时才整理出相关等待关系",
+      "owner": "Lock\n负责人",
+      "example_date": "2026-10-21"
+    },
+    {
+      "id": "F2",
+      "name": "RCU状态与告警人工比对",
+      "S": 8, "O": 6, "D": 8,
+      "d_basis": "同GP/CPU的多次告警与状态需关联",
+      "delays_h": [8, 8, 10, 10, 12, 12],
+      "platforms": ["硅片", "硅片", "硅片", "FPGA", "FPGA", "ESL"],
+      "symptoms": ["RCU", "RCU", "RCU", "RCU", "RCU", "RCU"],
+      "confirmation_content": "QS、GP线程、timer\n分支判断是否返工",
+      "confirmation_method": "连续stall日志\n与分析记录对照",
+      "confirmation_standard": "分支返工有记录\n延迟占比≥10%",
+      "example_evidence": "示例设定：前期未将连续告警按GP/CPU整理，补齐对应状态后修正排查分支",
+      "owner": "RCU\n负责人",
+      "example_date": "2026-10-21"
+    },
+    {
+      "id": "F3",
+      "name": "频率与计时口径记录缺项",
+      "S": 6, "O": 4, "D": 8,
+      "d_basis": "需对照频率、计数器、IRQ与工作负载进度",
+      "delays_h": [4, 6, 8],
+      "platforms": ["FPGA", "FPGA", "ESL"],
+      "symptoms": ["RCU", "RCU", "RCU"],
+      "confirmation_content": "低频、计时口径缺项\n是否导致误判重查",
+      "confirmation_method": "运行配置、IRQ\n与进度记录核对",
+      "confirmation_standard": "缺项致返工有据\n延迟占比≥10%",
+      "example_evidence": "示例设定：补查CPU/内存/互联频率、系统计数器及进度记录后，才明确慢与停滞的区别",
+      "owner": "平台\n接口人",
+      "example_date": "2026-10-22"
+    },
+    {
+      "id": "F4",
+      "name": "软硬证据缺少共同事件对应",
+      "S": 10, "O": 6, "D": 10,
+      "d_basis": "需芯片侧核对事务/IRQ及时间对应关系",
+      "delays_h": [12, 16, 18, 20, 24],
+      "platforms": ["FPGA", "FPGA", "FPGA", "ESL", "ESL"],
+      "symptoms": ["Lock", "Lock", "Lock", "RCU", "RCU"],
+      "confirmation_content": "串口与硬件记录\n是否因未对齐而补采",
+      "confirmation_method": "交接记录与\n平台反馈复查",
+      "confirmation_standard": "补证等待有记录\n延迟占比≥10%",
+      "example_evidence": "示例设定：首次联查无法对应同一次异常，追加共同事件标记后才完成芯片侧核查；不设定硬件已经故障",
+      "owner": "平台\n接口人",
+      "example_date": "2026-10-22"
+    },
+    {
+      "id": "F5",
+      "name": "dump与符号未成套交接",
+      "S": 6, "O": 4, "D": 4,
+      "d_basis": "加载与版本核对即可暴露多数缺项",
+      "delays_h": [4, 6, 8],
+      "platforms": ["硅片", "FPGA", "ESL"],
+      "symptoms": ["Lock", "RCU", "RCU"],
+      "confirmation_content": "符号、dump或镜像\n缺项是否阻断分析",
+      "confirmation_method": "加载结果与\n补材料记录对照",
+      "confirmation_standard": "阻断分析有记录\n延迟占比≥10%",
+      "example_evidence": "示例设定：匹配符号或版本清单后才继续读取本次诊断所需对象",
+      "owner": "现场\n接口人",
+      "example_date": "2026-10-23"
+    },
+    {
+      "id": "F6",
+      "name": "复现前未明确假设和观察点",
+      "S": 8, "O": 6, "D": 10,
+      "d_basis": "需复跑后才暴露观察点不能回答问题",
+      "delays_h": [10, 12, 14, 16, 18],
+      "platforms": ["FPGA", "FPGA", "FPGA", "ESL", "ESL"],
+      "symptoms": ["Lock", "Lock", "Lock", "RCU", "RCU"],
+      "confirmation_content": "复现输出是否回答\n当轮待验证的问题",
+      "confirmation_method": "逐轮脚本、日志\n与补点记录对照",
+      "confirmation_standard": "无效重跑有记录\n延迟占比≥10%",
+      "example_evidence": "示例设定：上一轮输出没有覆盖待查分支，补观察点后重跑；只计由该缺口造成的追加时间",
+      "owner": "测试\n负责人",
+      "example_date": "2026-10-23"
+    }
+  ],
+  "countermeasures": [
+    ["F1 等锁链靠人工\n跨CPU逐个还原", "Agent调用\nvmcore查锁工具", "初查＋复核工时\n减少≥50%\n关键项无错漏", "先核对dump与符号；crash批量取CPU/任务栈，\ndrgn查锁对象，按地址关联源码；\n输出等待关系及命令、地址、原始结果。", "工具负责人\nLock负责人", "第2周\n（计划）"],
+    ["F2 RCU状态与告警\n靠人工反复比对", "Agent关联\nRCU停滞线索", "分支初判＋复核\n≤2h\n关键项无错漏", "同GP/CPU关联stall日志与vmcore状态；\n检查QS、GP线程及timer/IRQ线索；\n附原始依据，未定分支只列必要补采项。", "工具负责人\nRCU负责人", "第2周\n（计划）"],
+    ["F4 软硬证据缺少\n共同事件对应", "Agent汇总\n平台联查材料", "首份材料≤0.5日\n一次交接材料\n完整率≥90%", "汇总频率、计时模式和固件版本；按共同\n事件标记对照串口与平台trace，列CPU、\n地址、事务/IRQ核查项，由平台侧复核。", "内核负责人\n平台接口人", "第3周\n（计划）"],
+    ["F6 复现前未定好\n假设和观察点", "Agent辅助\n编排定向复现", "无有效证据的\n重跑轮次减少\n≥50%", "读取脚本、版本和平台限制；按当前假设\n选最少的trace/寄存器观察点，写明预期\n结果与停止条件；测试审核后执行。", "工具负责人\n测试负责人", "第4周\n（计划）"]
+  ]
+}
