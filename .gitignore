@@ -2,3 +2,4 @@
 __pycache__/
 .kimi-code
 .obsidian/workspace.json
+.agents/settings.local.json
