@@ -1,0 +1,614 @@
+From 72bcbc74b2fea60b9a16e1c3fdb7959ef04779cf Mon Sep 17 00:00:00 2001
+From: Fanhua Li <lifanhua5@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:06 +0800
+Subject: [PATCH OLK-6.6 v5 14/18] arm64: mm: Introduce procfs interface to
+ update PBHA0 bit
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Introduce /proc/<pid>/pbha_bit0 to update PBHA bit0.
+
+Value 0/1 can be accepted by this procfs:
+- 0: iter all vmas of this task, clear VM_PBHA_BIT0 for all vmas.
+  New vma will stop bring VM_PBHA_BIT0 if exists. clear PTE 59 bit for
+  all pte entries.
+- 1: iter all vmas of this task, set VM_PBHA_BIT0 for all vmas.
+  New vma will bring VM_PBHA_BIT0 by default. set PTE 59 bit for
+  all pte entries.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v5:
+ - move the /proc/<pid>/pbha_bit0 implementation to fs/proc/pbha.c; base.c
+   only registers the entry
+
+Changes in v3:
+ - use pmdp_invalidate_ad() when rewriting a live THP pmd
+ - use get_task_mm()/mmput() in pbha_bit0_read()
+ - add a .hugetlb_entry callback so hugetlb mappings are updated too
+ - drop the mm->def_flags early return and track whether anything changed
+---
+ Documentation/admin-guide/mm/pagemap.rst |   4 +-
+ arch/arm64/include/asm/pgtable.h         |   9 ++
+ drivers/soc/hisilicon/pbha.c             | 197 +++++++++++++++++++++++
+ fs/proc/Makefile                         |   1 +
+ fs/proc/base.c                           |  10 ++
+ fs/proc/pbha.c                           | 121 ++++++++++++++
+ fs/proc/task_mmu.c                       |  15 ++
+ include/linux/mm.h                       |   2 +-
+ include/linux/pbha.h                     |  31 ++++
+ 9 files changed, 388 insertions(+), 2 deletions(-)
+ create mode 100644 fs/proc/pbha.c
+
+diff --git a/Documentation/admin-guide/mm/pagemap.rst b/Documentation/admin-guide/mm/pagemap.rst
+index c8f380271cad..f81a4045d0e6 100644
+--- a/Documentation/admin-guide/mm/pagemap.rst
++++ b/Documentation/admin-guide/mm/pagemap.rst
+@@ -21,7 +21,9 @@ There are four components to pagemap:
+     * Bit  56    page exclusively mapped (since 4.2)
+     * Bit  57    pte is uffd-wp write-protected (since 5.13) (see
+       Documentation/admin-guide/mm/userfaultfd.rst)
+-    * Bits 58-60 zero
++    * Bits 58 zero
++    * Bit  59    PBHA bit0, used only CONFIG_ARM64_PBHA is enabled
++    * Bits 60 zero
+     * Bit  61    page is file-page or shared-anon (since 3.5)
+     * Bit  62    page swapped
+     * Bit  63    page present
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 4514cb0ea736..6326bba0feb4 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -654,6 +654,15 @@ static inline pte_t pte_mkpbha(pte_t pte, unsigned long pbha_val)
+ 	return set_pte_bit(pte, __pgprot(__pbha_check_perf_only(pbha_val)));
+ }
+ 
++#define pmd_mkpbha(pmd, pbha_val)	pte_pmd(pte_mkpbha(pmd_pte(pmd), pbha_val))
++
++static inline pte_t pte_rmpbha(pte_t pte, unsigned long pbha_val)
++{
++	return clear_pte_bit(pte, __pgprot(__pbha_check_perf_only(pbha_val)));
++}
++
++#define pmd_rmpbha(pmd, pbha_val)	pte_pmd(pte_rmpbha(pmd_pte(pmd), pbha_val))
++
+ /*
+  * DMA allocations for non-coherent devices use what the Arm architecture calls
+  * "Normal non-cacheable" memory, which permits speculation, unaligned accesses
+diff --git a/drivers/soc/hisilicon/pbha.c b/drivers/soc/hisilicon/pbha.c
+index 7e80dcf77607..5de5dbb89b6d 100644
+--- a/drivers/soc/hisilicon/pbha.c
++++ b/drivers/soc/hisilicon/pbha.c
+@@ -9,8 +9,15 @@
+ #include <linux/libfdt.h>
+ #include <linux/printk.h>
+ #include <linux/cpufeature.h>
++#include <linux/mmu_notifier.h>
++#include <linux/hugetlb.h>
++#include <linux/pagewalk.h>
++#include <linux/pbha.h>
++#include <linux/mm_inline.h>
+ #include <linux/cache.h>
++
+ #include <asm/setup.h>
++#include <linux/processor.h>
+ 
+ #define MOC_MODE_CACHE	1
+ 
+@@ -40,3 +47,193 @@ void __init early_pbha_bit0_init(void)
+ 	if (*prop == MOC_MODE_CACHE)
+ 		pbha_bit0_enabled = true;
+ }
++
++#define pte_pbha_bit0(pte)                                                     \
++	(!!(pte_val(pte) & (PBHA_VAL_BIT0 << PBHA_BITS_SHIFT)))
++
++enum {
++	CLEAR_PBHA_BIT0_FLAG,
++	SET_PBHA_BIT0_FLAG,
++};
++
++static inline void pbha_bit0_update_pte_bits(struct vm_area_struct *vma,
++		unsigned long addr, pte_t *pte, bool set)
++{
++	pte_t ptent = *pte;
++
++	if (pte_present(ptent)) {
++		pte_t old_pte;
++
++		old_pte = ptep_modify_prot_start(vma, addr, pte);
++		if (set)
++			ptent = pte_mkpbha(old_pte, PBHA_VAL_BIT0);
++		else
++			ptent = pte_rmpbha(old_pte, PBHA_VAL_BIT0);
++		ptep_modify_prot_commit(vma, addr, pte, old_pte, ptent);
++	}
++}
++
++#ifdef CONFIG_TRANSPARENT_HUGEPAGE
++static inline void pbha_bit0_update_pmd_bits(struct vm_area_struct *vma,
++		unsigned long addr, pmd_t *pmdp, bool set)
++{
++	if (pmd_present(*pmdp)) {
++		pmd_t pmd = pmdp_invalidate_ad(vma, addr, pmdp);
++
++		if (set)
++			pmd = pmd_mkpbha(pmd, PBHA_VAL_BIT0);
++		else
++			pmd = pmd_rmpbha(pmd, PBHA_VAL_BIT0);
++
++		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
++	}
++}
++#else
++static inline void pbha_bit0_update_pmd_bits(struct vm_area_struct *vma,
++					      unsigned long addr, pmd_t *pmdp,
++					      bool set)
++{
++}
++#endif
++
++static int pbha_bit0_pte_range(pmd_t *pmd, unsigned long addr,
++				unsigned long end, struct mm_walk *walk)
++{
++	int *op = (int *)walk->private;
++	struct vm_area_struct *vma = walk->vma;
++	pte_t *pte;
++	spinlock_t *ptl;
++	bool set = (*op == SET_PBHA_BIT0_FLAG);
++
++	ptl = pmd_trans_huge_lock(pmd, vma);
++	if (ptl) {
++		pbha_bit0_update_pmd_bits(vma, addr, pmd, set);
++
++		spin_unlock(ptl);
++		return 0;
++	}
++
++	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
++	if (!pte) {
++		walk->action = ACTION_AGAIN;
++		return 0;
++	}
++	for (; addr != end; pte++, addr += PAGE_SIZE)
++		pbha_bit0_update_pte_bits(vma, addr, pte, set);
++	pte_unmap_unlock(pte - 1, ptl);
++	cond_resched();
++	return 0;
++}
++
++static int pbha_bit0_test_walk(unsigned long start, unsigned long end,
++				struct mm_walk *walk)
++{
++	struct vm_area_struct *vma = walk->vma;
++
++	if (vma->vm_flags & VM_PFNMAP)
++		return 1;
++
++	return 0;
++}
++
++#ifdef CONFIG_HUGETLB_PAGE
++static int pbha_bit0_hugetlb_entry(pte_t *ptep, unsigned long hmask,
++				   unsigned long addr, unsigned long next,
++				   struct mm_walk *walk)
++{
++	struct vm_area_struct *vma = walk->vma;
++	struct hstate *h = hstate_vma(vma);
++	unsigned long sz = huge_page_size(h);
++	bool set = (*(int *)walk->private == SET_PBHA_BIT0_FLAG);
++	struct mm_struct *mm = walk->mm;
++	spinlock_t *ptl;
++	pte_t pte;
++
++	/*
++	 * Page tables shared between mms are visible to every sharer, leave
++	 * them alone instead of changing the hint behind their back.
++	 */
++	if (hugetlb_pmd_shared(ptep))
++		return 0;
++
++	ptl = huge_pte_lock(h, mm, ptep);
++	pte = huge_ptep_get(ptep);
++	if (pte_present(pte)) {
++		if (set)
++			pte = pte_mkpbha(pte, PBHA_VAL_BIT0);
++		else
++			pte = pte_rmpbha(pte, PBHA_VAL_BIT0);
++
++		set_huge_pte_at(mm, addr & hmask, ptep, pte, sz);
++	}
++	spin_unlock(ptl);
++
++	return 0;
++}
++#endif
++
++struct mm_walk_ops pbha_bit0_walk_ops = {
++	.pmd_entry		= pbha_bit0_pte_range,
++#ifdef CONFIG_HUGETLB_PAGE
++	.hugetlb_entry		= pbha_bit0_hugetlb_entry,
++#endif
++	.test_walk		= pbha_bit0_test_walk,
++};
++
++int pbha_bit0_update_vma(struct mm_struct *mm, int val)
++{
++	struct mmu_notifier_range range;
++	struct vm_area_struct *vma;
++	struct vma_iterator vmi;
++	bool need_update = false;
++
++	if (!system_support_pbha_bit0())
++		return -EINVAL;
++
++	if (mmap_write_lock_killable(mm))
++		return -EINTR;
++
++	if (val == SET_PBHA_BIT0_FLAG) {
++		if (!(mm->def_flags & VM_PBHA_BIT0)) {
++			mm->def_flags |= VM_PBHA_BIT0;
++			need_update = true;
++		}
++		vma_iter_init(&vmi, mm, 0);
++		for_each_vma(vmi, vma) {
++			if (vma->vm_flags & VM_PBHA_BIT0)
++				continue;
++			vm_flags_set(vma, VM_PBHA_BIT0);
++			vma_set_page_prot(vma);
++			need_update = true;
++		}
++	} else {
++		if (mm->def_flags & VM_PBHA_BIT0) {
++			mm->def_flags &= ~VM_PBHA_BIT0;
++			need_update = true;
++		}
++		vma_iter_init(&vmi, mm, 0);
++		for_each_vma(vmi, vma) {
++			if (!(vma->vm_flags & VM_PBHA_BIT0))
++				continue;
++			vm_flags_clear(vma, VM_PBHA_BIT0);
++			vma_set_page_prot(vma);
++			need_update = true;
++		}
++	}
++
++	if (!need_update) {
++		mmap_write_unlock(mm);
++		return 0;
++	}
++
++	inc_tlb_flush_pending(mm);
++	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm, 0, -1UL);
++	mmu_notifier_invalidate_range_start(&range);
++	walk_page_range(mm, 0, -1, &pbha_bit0_walk_ops, &val);
++	mmu_notifier_invalidate_range_end(&range);
++	flush_tlb_mm(mm);
++	dec_tlb_flush_pending(mm);
++
++	mmap_write_unlock(mm);
++	return 0;
++}
+diff --git a/fs/proc/Makefile b/fs/proc/Makefile
+index b17f9b9eb652..466d59ec9533 100644
+--- a/fs/proc/Makefile
++++ b/fs/proc/Makefile
+@@ -35,6 +35,7 @@ proc-$(CONFIG_PRINTK)	+= kmsg.o
+ proc-$(CONFIG_PROC_PAGE_MONITOR)	+= page.o
+ proc-$(CONFIG_BOOT_CONFIG)	+= bootconfig.o
+ proc-$(CONFIG_MEMORY_RELIABLE)	+= mem_reliable.o
++proc-$(CONFIG_ARM64_PBHA)		+= pbha.o
+ obj-$(CONFIG_ETMEM_SCAN)	+= etmem_scan.o
+ obj-$(CONFIG_ETMEM_SWAP)	+= etmem_swap.o
+ proc-${CONFIG_ETMEM}		+= etmem_proc.o
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index f34e357e9f97..5935064e8ec2 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -102,6 +102,7 @@
+ #include <linux/resctrl.h>
+ #include <linux/cn_proc.h>
+ #include <linux/ksm.h>
++#include <linux/pbha.h>
+ #include <trace/events/oom.h>
+ #include "internal.h"
+ #include "fd.h"
+@@ -2701,6 +2702,9 @@ static struct dentry *proc_pident_instantiate(struct dentry *dentry,
+ 
+ static bool proc_hide_pidents(const struct pid_entry *p)
+ {
++	if (pbha_bit0_hide_file(p->name))
++		return true;
++
+ 	if (mem_reliable_hide_file(p->name))
+ 		return true;
+ 
+@@ -3594,6 +3598,9 @@ static const struct pid_entry tgid_base_stuff[] = {
+ #ifdef CONFIG_MEMORY_RELIABLE
+ 	REG("reliable", S_IRUGO|S_IWUSR, proc_reliable_operations),
+ #endif
++#ifdef CONFIG_ARM64_PBHA
++	REG("pbha_bit0", 0644, proc_pbha_bit0_ops),
++#endif
+ #ifdef CONFIG_AUDIT
+ 	REG("loginuid",   S_IWUSR|S_IRUGO, proc_loginuid_operations),
+ 	REG("sessionid",  S_IRUGO, proc_sessionid_operations),
+@@ -4017,6 +4024,9 @@ static const struct pid_entry tid_base_stuff[] = {
+ #ifdef CONFIG_MEMORY_RELIABLE
+ 	REG("reliable", S_IRUGO|S_IWUSR, proc_reliable_operations),
+ #endif
++#ifdef CONFIG_ARM64_PBHA
++	REG("pbha_bit0", 0644, proc_pbha_bit0_ops),
++#endif
+ #ifdef CONFIG_AUDIT
+ 	REG("loginuid",  S_IWUSR|S_IRUGO, proc_loginuid_operations),
+ 	REG("sessionid",  S_IRUGO, proc_sessionid_operations),
+diff --git a/fs/proc/pbha.c b/fs/proc/pbha.c
+new file mode 100644
+index 000000000000..d9172a30e798
+--- /dev/null
++++ b/fs/proc/pbha.c
+@@ -0,0 +1,121 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (C) Huawei Technologies Co., Ltd. 2023. All rights reserved.
++ */
++
++#include <linux/fs.h>
++#include <linux/kstrtox.h>
++#include <linux/pbha.h>
++#include <linux/sched.h>
++#include <linux/sched/mm.h>
++#include <linux/sprintf.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++
++#include "internal.h"
++
++static int pbha_bit0_check(struct task_struct *task)
++{
++	if (!system_support_pbha_bit0())
++		return -EACCES;
++
++	if (is_global_init(task))
++		return -EACCES;
++
++	if (!task->mm || (task->flags & PF_KTHREAD) ||
++	    (task->flags & PF_EXITING))
++		return -EACCES;
++
++	return 0;
++}
++
++static ssize_t pbha_bit0_read(struct file *file, char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct task_struct *task = get_proc_task(file_inode(file));
++	char buffer[PROC_NUMBUF];
++	struct mm_struct *mm;
++	size_t len;
++	short val;
++	int err;
++
++	if (!task)
++		return -ESRCH;
++
++	err = pbha_bit0_check(task);
++	if (err) {
++		put_task_struct(task);
++		return err;
++	}
++
++	mm = get_task_mm(task);
++	if (!mm) {
++		put_task_struct(task);
++		return -ESRCH;
++	}
++
++	val = mm->def_flags & VM_PBHA_BIT0 ? 1 : 0;
++	mmput(mm);
++	put_task_struct(task);
++	len = snprintf(buffer, sizeof(buffer), "%hd\n", val);
++
++	return simple_read_from_buffer(buf, count, ppos, buffer, len);
++}
++
++static ssize_t pbha_bit0_write(struct file *file, const char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct task_struct *task = get_proc_task(file_inode(file));
++	char buffer[PROC_NUMBUF];
++	struct mm_struct *mm;
++	int val, err;
++
++	if (!task)
++		return -ESRCH;
++
++	err = pbha_bit0_check(task);
++	if (err)
++		goto out;
++
++	memset(buffer, 0, sizeof(buffer));
++	if (count > sizeof(buffer) - 1)
++		count = sizeof(buffer) - 1;
++	if (copy_from_user(buffer, buf, count)) {
++		err = -EFAULT;
++		goto out;
++	}
++
++	err = kstrtoint(strstrip(buffer), 0, &val);
++	if (err)
++		goto out;
++	if (val != 0 && val != 1) {
++		err = -EINVAL;
++		goto out;
++	}
++
++	mm = get_task_mm(task);
++	if (!mm) {
++		err = -ENOENT;
++		goto out;
++	}
++
++	err = pbha_bit0_update_vma(mm, val);
++	mmput(mm);
++out:
++	put_task_struct(task);
++	return err < 0 ? err : count;
++}
++
++const struct file_operations proc_pbha_bit0_ops = {
++	.read       = pbha_bit0_read,
++	.write      = pbha_bit0_write,
++	.llseek     = generic_file_llseek,
++};
++
++bool pbha_bit0_hide_file(const char *name)
++{
++	if (!system_support_pbha_bit0() && !strncmp("pbha_bit0", name, 9))
++		return true;
++
++	return false;
++}
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index 09bacd826511..fecf97c3507a 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -20,6 +20,7 @@
+ #include <linux/shmem_fs.h>
+ #include <linux/uaccess.h>
+ #include <linux/pkeys.h>
++#include <linux/pbha.h>
+ 
+ #include <asm/elf.h>
+ #include <asm/tlb.h>
+@@ -1362,6 +1363,11 @@ struct pagemapread {
+ #define PM_SOFT_DIRTY		BIT_ULL(55)
+ #define PM_MMAP_EXCLUSIVE	BIT_ULL(56)
+ #define PM_UFFD_WP		BIT_ULL(57)
++#ifdef CONFIG_ARM64_PBHA
++#define PM_PBHA_BIT0		BIT_ULL(59)
++#else
++#define PM_PBHA_BIT0		0
++#endif
+ #define PM_FILE			BIT_ULL(61)
+ #define PM_SWAP			BIT_ULL(62)
+ #define PM_PRESENT		BIT_ULL(63)
+@@ -1463,6 +1469,9 @@ static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
+ 			flags |= PM_UFFD_WP;
+ 	}
+ 
++	if (pte_pbha(pte))
++		flags |= PM_PBHA_BIT0;
++
+ 	if (page && !PageAnon(page))
+ 		flags |= PM_FILE;
+ 	if (page && (flags & PM_PRESENT) && page_mapcount(page) == 1)
+@@ -1527,6 +1536,9 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
+ 		}
+ #endif
+ 
++		if (pmd_pbha(pmd))
++			flags |= PM_PBHA_BIT0;
++
+ 		if (page && !PageAnon(page))
+ 			flags |= PM_FILE;
+ 
+@@ -1606,6 +1618,9 @@ static int pagemap_hugetlb_range(pte_t *ptep, unsigned long hmask,
+ 		if (huge_pte_uffd_wp(pte))
+ 			flags |= PM_UFFD_WP;
+ 
++		if (pte_pbha(pte))
++			flags |= PM_PBHA_BIT0;
++
+ 		flags |= PM_PRESENT;
+ 		if (pm->show_pfn)
+ 			frame = pte_pfn(pte) +
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index c94c8f43f8a0..765319d3a71c 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -488,7 +488,7 @@ extern unsigned int kobjsize(const void *objp);
+ #define VM_NO_KHUGEPAGED (VM_SPECIAL | VM_HUGETLB)
+ 
+ /* This mask defines which mm->def_flags a process can inherit its parent */
+-#define VM_INIT_DEF_MASK	VM_NOHUGEPAGE
++#define VM_INIT_DEF_MASK	(VM_NOHUGEPAGE | VM_PBHA_BIT0)
+ 
+ /* This mask represents all the VMA flag bits used by mlock */
+ #define VM_LOCKED_MASK	(VM_LOCKED | VM_LOCKONFAULT)
+diff --git a/include/linux/pbha.h b/include/linux/pbha.h
+index ae4f29331ac5..1b6efe6c9b82 100644
+--- a/include/linux/pbha.h
++++ b/include/linux/pbha.h
+@@ -5,11 +5,13 @@
+ #ifndef __LINUX_PBHA_H
+ #define __LINUX_PBHA_H
+ 
++#include <linux/fs.h>
+ #include <linux/mm.h>
+ #include <linux/libfdt.h>
+ #include <linux/pgtable.h>
+ 
+ #define PBHA_VAL_BIT0 1UL
++#define PBHA_BITS_SHIFT 59
+ 
+ #define EFI_OEMCONFIG_VARIABLE_GUID                                            \
+ 	EFI_GUID(0x21f3b3c5, 0x946d, 0x41c1, 0x83, 0x8c, 0x19, 0x4e, 0x48,     \
+@@ -20,7 +22,11 @@
+ 
+ #ifdef CONFIG_ARM64_PBHA
+ extern bool __ro_after_init pbha_bit0_enabled;
++extern struct mm_walk_ops pbha_bit0_walk_ops;
+ extern void __init early_pbha_bit0_init(void);
++extern int pbha_bit0_update_vma(struct mm_struct *mm, int val);
++extern const struct file_operations proc_pbha_bit0_ops;
++bool pbha_bit0_hide_file(const char *name);
+ 
+ static inline bool system_support_pbha_bit0(void)
+ {
+@@ -45,13 +51,38 @@ static inline pte_t maybe_mk_pbha_bit0(pte_t pte, struct vm_area_struct *vma)
+ 
+ 	return pte;
+ }
++
++static inline bool pte_pbha(pte_t pte)
++{
++	if (!system_support_pbha_bit0())
++		return false;
++
++	return !!(pte_val(pte) & (PBHA_VAL_BIT0 << PBHA_BITS_SHIFT));
++}
++
++static inline bool pmd_pbha(pmd_t pmd)
++{
++	if (!system_support_pbha_bit0())
++		return false;
++
++	return !!(pmd_val(pmd) & (PBHA_VAL_BIT0 << PBHA_BITS_SHIFT));
++}
+ #else
+ static inline bool system_support_pbha_bit0(void) { return false; }
++static inline bool pbha_bit0_hide_file(const char *name) { return false; }
+ static inline pgprot_t pgprot_pbha_bit0(pgprot_t prot) { return prot; }
+ static inline pte_t maybe_mk_pbha_bit0(pte_t pte, struct vm_area_struct *vma)
+ {
+ 	return pte;
+ }
++static inline bool pte_pbha(pte_t pte)
++{
++	return false;
++}
++static inline bool pmd_pbha(pmd_t pte)
++{
++	return false;
++}
+ #endif
+ 
+ #endif

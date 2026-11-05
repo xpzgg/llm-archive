@@ -1,0 +1,53 @@
+From 294b2e476bcb68800734e29820906d954a84caa5 Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:08 +0800
+Subject: [PATCH OLK-6.6 v5 16/18] arm64: mm: Introduce prctl to control pbha
+ behavior
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Introduce prctl to control pbha behavior.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ include/uapi/linux/prctl.h |  1 +
+ kernel/sys.c               | 10 ++++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/include/uapi/linux/prctl.h b/include/uapi/linux/prctl.h
+index 370ed14b1ae0..02229dfc21d0 100644
+--- a/include/uapi/linux/prctl.h
++++ b/include/uapi/linux/prctl.h
+@@ -306,4 +306,5 @@ struct prctl_mm_map {
+ # define PR_RISCV_V_VSTATE_CTRL_NEXT_MASK	0xc
+ # define PR_RISCV_V_VSTATE_CTRL_MASK		0x1f
+ 
++#define PR_UPDATE_PBHA_BIT0		0x82312f0
+ #endif /* _LINUX_PRCTL_H */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 7465bb7c8919..9ef86e9faa35 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2767,6 +2767,16 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 	case PR_RISCV_V_GET_CONTROL:
+ 		error = RISCV_V_GET_CONTROL();
+ 		break;
++#ifdef CONFIG_ARM64_PBHA
++	case PR_UPDATE_PBHA_BIT0:
++		if (arg3 || arg4 || arg5)
++			return -EINVAL;
++		if (arg2 != 0 && arg2 != 1)
++			return -EINVAL;
++
++		error = pbha_bit0_update_vma(me->mm, arg2);
++		break;
++#endif
+ 	default:
+ 		error = -EINVAL;
+ 		break;

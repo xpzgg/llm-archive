@@ -1,0 +1,171 @@
+From 50e9734720df254c909a0e4339b10e16fcd60d39 Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:04 +0800
+Subject: [PATCH OLK-6.6 v5 12/18] arm64: mm: Introduce VM_PBHA_BIT0 to enable
+ pbha bit0 for single vma
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Introduce VM_PBHA_BIT0 to enable pbha bit0 for single vma.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v3:
+ - use VM_HIGH_ARCH_5 (bit 37) instead of bit 39
+ - document the p0 mnemonic in Documentation/filesystems/proc.rst
+ - drop the unused <uapi/asm/mman.h> include
+ - fix the VM_PBHA_BIT0 comment
+---
+ Documentation/filesystems/proc.rst           | 1 +
+ arch/arm64/Kconfig                           | 1 +
+ arch/arm64/include/asm/mman.h                | 7 +++++++
+ arch/arm64/include/uapi/asm/mman.h           | 1 +
+ arch/arm64/mm/mmap.c                         | 3 +++
+ fs/proc/task_mmu.c                           | 3 +++
+ include/linux/mm.h                           | 6 ++++++
+ include/uapi/asm-generic/mman-common.h       | 1 +
+ tools/include/uapi/asm-generic/mman-common.h | 1 +
+ 9 files changed, 24 insertions(+)
+
+diff --git a/Documentation/filesystems/proc.rst b/Documentation/filesystems/proc.rst
+index a0062574e2ce..17c2c79d70c4 100644
+--- a/Documentation/filesystems/proc.rst
++++ b/Documentation/filesystems/proc.rst
+@@ -572,6 +572,7 @@ encoded manner. The codes are the following:
+     mg    mergeable advise flag
+     bt    arm64 BTI guarded page
+     mt    arm64 MTE allocation tags are enabled
++    p0    arm64 PBHA bit 0 is enabled
+     um    userfaultfd missing tracking
+     uw    userfaultfd wr-protect tracking
+     ss    shadow stack page
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 56f05c78c9d4..18ad070d5b8e 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2199,6 +2199,7 @@ config ARM64_CNP
+ config ARM64_PBHA
+ 	bool "Enable support for Page Based Hardware Attributes (PBHA)"
+ 	default n
++	select ARCH_USES_HIGH_VMA_FLAGS
+ 	help
+ 	  Page Based Hardware Attributes (PBHA) allow the SoC hardware to
+ 	  change behaviour depending on which mapping was used to access
+diff --git a/arch/arm64/include/asm/mman.h b/arch/arm64/include/asm/mman.h
+index 5966ee4a6154..ff95d6c65fb7 100644
+--- a/arch/arm64/include/asm/mman.h
++++ b/arch/arm64/include/asm/mman.h
+@@ -5,6 +5,7 @@
+ #include <linux/compiler.h>
+ #include <linux/types.h>
+ #include <uapi/asm/mman.h>
++#include <linux/pbha.h>
+ 
+ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
+ 	unsigned long pkey __always_unused)
+@@ -17,6 +18,9 @@ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
+ 	if (system_supports_mte() && (prot & PROT_MTE))
+ 		ret |= VM_MTE;
+ 
++	if (system_support_pbha_bit0() && (prot & PROT_PBHA_BIT0))
++		ret |= VM_PBHA_BIT0;
++
+ 	return ret;
+ }
+ #define arch_calc_vm_prot_bits(prot, pkey) arch_calc_vm_prot_bits(prot, pkey)
+@@ -46,6 +50,9 @@ static inline bool arch_validate_prot(unsigned long prot,
+ 	if (system_supports_mte())
+ 		supported |= PROT_MTE;
+ 
++	if (system_support_pbha_bit0())
++		supported |= PROT_PBHA_BIT0;
++
+ 	return (prot & ~supported) == 0;
+ }
+ #define arch_validate_prot(prot, addr) arch_validate_prot(prot, addr)
+diff --git a/arch/arm64/include/uapi/asm/mman.h b/arch/arm64/include/uapi/asm/mman.h
+index 1e6482a838e1..07e6f340a2f3 100644
+--- a/arch/arm64/include/uapi/asm/mman.h
++++ b/arch/arm64/include/uapi/asm/mman.h
+@@ -6,5 +6,6 @@
+ 
+ #define PROT_BTI	0x10		/* BTI guarded page */
+ #define PROT_MTE	0x20		/* Normal Tagged mapping */
++#define PROT_PBHA_BIT0	0x1000		/* PBHA 59 bit */
+ 
+ #endif /* ! _UAPI__ASM_MMAN_H */
+diff --git a/arch/arm64/mm/mmap.c b/arch/arm64/mm/mmap.c
+index 8f5b7ce857ed..75d099699c8c 100644
+--- a/arch/arm64/mm/mmap.c
++++ b/arch/arm64/mm/mmap.c
+@@ -98,6 +98,9 @@ pgprot_t vm_get_page_prot(unsigned long vm_flags)
+ 	if (vm_flags & VM_MTE)
+ 		prot |= PTE_ATTRINDX(MT_NORMAL_TAGGED);
+ 
++	if (vm_flags & VM_PBHA_BIT0)
++		prot |= PTE_PBHA0;
++
+ 	return __pgprot(prot);
+ }
+ EXPORT_SYMBOL(vm_get_page_prot);
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index 35c6a736e11c..09bacd826511 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -684,6 +684,9 @@ static void show_smap_vma_flags(struct seq_file *m, struct vm_area_struct *vma)
+ 		[ilog2(VM_MTE)]		= "mt",
+ 		[ilog2(VM_MTE_ALLOWED)]	= "",
+ #endif
++#ifdef CONFIG_ARM64_PBHA
++		[ilog2(VM_PBHA_BIT0)]	= "p0",
++#endif
+ #ifdef CONFIG_ARCH_HAS_PKEYS
+ 		/* These come out via ProtectionKey: */
+ 		[ilog2(VM_PKEY_BIT0)]	= "",
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index dfe362127354..c94c8f43f8a0 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -411,6 +411,12 @@ extern unsigned int kobjsize(const void *objp);
+ # define VM_SHARE_POOL VM_NONE
+ #endif
+ 
++#if defined(CONFIG_ARM64_PBHA)
++# define VM_PBHA_BIT0	VM_HIGH_ARCH_5	/* Page Based Hardware Attributes bit 0 */
++#else
++# define VM_PBHA_BIT0	VM_NONE
++#endif
++
+ #ifndef VM_GROWSUP
+ # define VM_GROWSUP	VM_NONE
+ #endif
+diff --git a/include/uapi/asm-generic/mman-common.h b/include/uapi/asm-generic/mman-common.h
+index 559ad7c50b60..25c5170d6c26 100644
+--- a/include/uapi/asm-generic/mman-common.h
++++ b/include/uapi/asm-generic/mman-common.h
+@@ -13,6 +13,7 @@
+ #define PROT_SEM	0x8		/* page may be used for atomic ops */
+ /*			0x10		   reserved for arch-specific use */
+ /*			0x20		   reserved for arch-specific use */
++/*			0x1000		   reserved for arch-specific use */
+ #define PROT_NONE	0x0		/* page can not be accessed */
+ #define PROT_GROWSDOWN	0x01000000	/* mprotect flag: extend change to start of growsdown vma */
+ #define PROT_GROWSUP	0x02000000	/* mprotect flag: extend change to end of growsup vma */
+diff --git a/tools/include/uapi/asm-generic/mman-common.h b/tools/include/uapi/asm-generic/mman-common.h
+index 6ce1f1ceb432..e397d1224747 100644
+--- a/tools/include/uapi/asm-generic/mman-common.h
++++ b/tools/include/uapi/asm-generic/mman-common.h
+@@ -13,6 +13,7 @@
+ #define PROT_SEM	0x8		/* page may be used for atomic ops */
+ /*			0x10		   reserved for arch-specific use */
+ /*			0x20		   reserved for arch-specific use */
++/*			0x1000		   reserved for arch-specific use */
+ #define PROT_NONE	0x0		/* page can not be accessed */
+ #define PROT_GROWSDOWN	0x01000000	/* mprotect flag: extend change to start of growsdown vma */
+ #define PROT_GROWSUP	0x02000000	/* mprotect flag: extend change to end of growsup vma */

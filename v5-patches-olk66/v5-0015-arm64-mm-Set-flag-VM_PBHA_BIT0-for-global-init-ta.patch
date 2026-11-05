@@ -1,0 +1,39 @@
+From b3f7d4fb9d21b27e7321f16abc2a199fc4beba33 Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:07 +0800
+Subject: [PATCH OLK-6.6 v5 15/18] arm64: mm: Set flag VM_PBHA_BIT0 for global
+ init task
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Set flag VM_PBHA_BIT0 for global init task during #PF.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v3:
+ - only flag VMAs that belong to current->mm
+---
+ include/linux/pbha.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/include/linux/pbha.h b/include/linux/pbha.h
+index 1b6efe6c9b82..14388ef2a26c 100644
+--- a/include/linux/pbha.h
++++ b/include/linux/pbha.h
+@@ -46,6 +46,10 @@ static inline pte_t maybe_mk_pbha_bit0(pte_t pte, struct vm_area_struct *vma)
+ 	if (!system_support_pbha_bit0())
+ 		return pte;
+ 
++	if (unlikely(is_global_init(current)) && vma->vm_mm == current->mm &&
++	    !(vma->vm_flags & VM_PBHA_BIT0))
++		ACCESS_PRIVATE(vma, __vm_flags) |= VM_PBHA_BIT0;
++
+ 	if (vma->vm_flags & VM_PBHA_BIT0)
+ 		pte = pte_mkpbha(pte, PBHA_VAL_BIT0);
+ 

@@ -1,0 +1,306 @@
+From 278ea6e051f89c57d737fa84860ec13b735397d5 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 29 Oct 2026 17:54:58 +0800
+Subject: [PATCH OLK-6.6 v5 06/18] KVM: arm64: Configure PBHA bits for stage2
+
+maillist inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+Reference: https://lore.kernel.org/all/20211015161416.2196-1-james.morse@arm.com/t/#u
+
+--------------------------------
+
+There are two conflicting use-cases for PBHA at stage2. We could copy
+the stage1 PBHA bits to stage2, this would ensure the VMMs memory is
+exactly reproduced for the guest, including the PBHA bits. The problem
+here is how the VMM's memory is allocated with the PBHA bits set.
+
+The other is allowing the guest to configure PBHA directly. This would
+allow guest device drivers to map memory with the appropriate PBHA bits.
+This would only be safe if the guest can be trusted to only generate
+PBHA values that only affect performance.
+
+The arm-arm doesn't describe how the stage1 and stage2 bits are combined.
+Arm's implementations appear to all have the same behaviour, according
+to the TRM: stage2 wins.
+
+For these CPUs, we can allow a guest to use a PBHA bit by disabling it
+in VTCR_EL2. We just need to know which bits...
+
+The DT describes the values that only affect performance, but if value-5
+is safe for use, we can't prevent the guest from using value-1 and value-4.
+These 'decomposed' values would also need to be listed as only affecting
+performance.
+
+Add a cpufeature for CPUs that have this 'stage2 wins' behaviour.
+Decompose each performance-only value (5 -> 5, 4, 1), and check each of
+these values is listed as only affecting performance. If so, the bits
+of the original value (5) can be used by the guest at stage1. (by clearing
+the bits from VTCR_EL2)
+
+Signed-off-by: James Morse <james.morse@arm.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v3:
+ - fix the for-loop style in plat_can_use_pbha_stage1()
+---
+ arch/arm64/include/asm/cpufeature.h |   1 +
+ arch/arm64/kernel/cpufeature.c      | 107 +++++++++++++++++++++++++++-
+ arch/arm64/kernel/image-vars.h      |   2 +
+ arch/arm64/kvm/hyp/pgtable.c        |   9 ++-
+ arch/arm64/tools/cpucaps            |   2 +-
+ 5 files changed, 117 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/include/asm/cpufeature.h b/arch/arm64/include/asm/cpufeature.h
+index 7a0c8981120b..e151c688606b 100644
+--- a/arch/arm64/include/asm/cpufeature.h
++++ b/arch/arm64/include/asm/cpufeature.h
+@@ -106,6 +106,7 @@ struct arm64_ftr_reg {
+ };
+ 
+ extern struct arm64_ftr_reg arm64_ftr_reg_ctrel0;
++extern unsigned long arm64_pbha_stage2_safe_bits;
+ 
+ /*
+  * CPU capabilities:
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index 5c6d85c684a8..b218985a3edc 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -81,6 +81,7 @@
+ #include <asm/cpu.h>
+ #include <asm/cpufeature.h>
+ #include <asm/cpu_ops.h>
++#include <asm/cputype.h>
+ #include <asm/fpsimd.h>
+ #include <asm/hwcap.h>
+ #include <asm/insn.h>
+@@ -126,6 +127,7 @@ DEFINE_PER_CPU_READ_MOSTLY(const char *, this_cpu_vector) = vectors;
+ 
+ unsigned long __ro_after_init arm64_pbha_perf_only_values;
+ EXPORT_SYMBOL(arm64_pbha_perf_only_values);
++unsigned long __ro_after_init arm64_pbha_stage2_safe_bits;
+ 
+ /*
+  * Permit PER_LINUX32 and execve() of 32-bit binaries even if not all CPUs
+@@ -2069,13 +2071,50 @@ static bool has_hw_dbm(const struct arm64_cpu_capabilities *cap,
+ 
+ #endif
+ 
++
+ #ifdef CONFIG_ARM64_PBHA
+ static u8 pbha_stage1_enable_bits;
++static DEFINE_SPINLOCK(pbha_dt_lock);
++
++/* For the value 5, return a bitmap with bits 5, 4, and 1 set. */
++static unsigned long decompose_pbha_values(u8 val)
++{
++	int i;
++	unsigned long mask = 0;
++
++	for (i = 1; i <= 15; i++) {
++		if ((i & val) == i)
++			set_bit(i, &mask);
++	}
++
++	return mask;
++}
++
++/*
++ * The bits of a value are safe if all values that can be built from those
++ * enabled bits are listed as only affecting performance.
++ * e.g. 5 would also need 1 and 4 to be listed.
++ *
++ * When there is a conflict with the bits already enabled, the new value is
++ * skipped.
++ * e.g. if 5 already caused bit-0 and bit-2 to be enabled, adding 3 to the list
++ * would need to test 7 as bit-2 is already enabled. If 7 is not listed, 3 is
++ * skipped and bit-1 is not enabled.
++ */
++static void stage2_test_pbha_value(u8 val)
++{
++	unsigned long mask;
++
++	mask = decompose_pbha_values(val | arm64_pbha_stage2_safe_bits);
++	if ((arm64_pbha_perf_only_values & mask) == mask)
++		arm64_pbha_stage2_safe_bits |= val;
++}
+ 
+ static bool plat_can_use_pbha_stage1(const struct arm64_cpu_capabilities *cap,
+ 				     int scope)
+ {
+ 	u8 val;
++	static bool dt_check_done;
+ 	struct device_node *cpus;
+ 	const u8 *perf_only_vals;
+ 	int num_perf_only_vals, i;
+@@ -2091,6 +2130,10 @@ static bool plat_can_use_pbha_stage1(const struct arm64_cpu_capabilities *cap,
+ 	if (scope == SCOPE_LOCAL_CPU)
+ 		return true;
+ 
++	spin_lock(&pbha_dt_lock);
++	if (dt_check_done)
++		goto out_unlock;
++
+ 	cpus = of_find_node_by_path("/cpus");
+ 	if (!cpus)
+ 		goto done;
+@@ -2101,7 +2144,7 @@ static bool plat_can_use_pbha_stage1(const struct arm64_cpu_capabilities *cap,
+ 		goto done;
+ 
+ 	/* any listed value is usable at stage 1 */
+-	for (i = 0 ; i < num_perf_only_vals; i++) {
++	for (i = 0; i < num_perf_only_vals; i++) {
+ 		val = perf_only_vals[i];
+ 		if (val > 0xf)
+ 			continue;
+@@ -2110,9 +2153,24 @@ static bool plat_can_use_pbha_stage1(const struct arm64_cpu_capabilities *cap,
+ 		set_bit(val, &arm64_pbha_perf_only_values);
+ 	}
+ 
++	/*
++	 * for stage2 the values are collapsed back to 4 bits that can only
++	 * enable values in the arm64_pbha_perf_only_values mask.
++	 */
++	for (i = 0; i < num_perf_only_vals; i++) {
++		val = perf_only_vals[i];
++		if (val > 0xf)
++			continue;
++
++		stage2_test_pbha_value(val);
++	}
++
+ done:
+ 	of_node_put(cpus);
++	dt_check_done = true;
+ 
++out_unlock:
++	spin_unlock(&pbha_dt_lock);
+ 	return !!pbha_stage1_enable_bits;
+ }
+ 
+@@ -2132,6 +2190,47 @@ static void cpu_enable_pbha(struct arm64_cpu_capabilities const *cap)
+ 	isb();
+ 	local_flush_tlb_all();
+ }
++
++/*
++ * PBHA's behaviour is implementation defined, as is the way it combines
++ * stage1 and stage2 attributes. If the kernel has KVM supported, and booted
++ * at EL2, only these CPUs can allow PBHA in a guest, as KVM knows how the PBHA
++ * bits are combined. This prevents the host being affected by some
++ * implementation defined behaviour from the guest.
++ *
++ * The TRM for these CPUs describe stage2 as overriding stage1.
++ */
++static const struct midr_range pbha_stage2_wins[] = {
++	MIDR_ALL_VERSIONS(MIDR_NEOVERSE_N1),
++	MIDR_ALL_VERSIONS(MIDR_CORTEX_A76),
++	MIDR_ALL_VERSIONS(MIDR_CORTEX_A77),
++	MIDR_ALL_VERSIONS(MIDR_CORTEX_A78),
++	{},
++};
++
++static bool plat_can_use_pbha_stage2(const struct arm64_cpu_capabilities *cap,
++				     int scope)
++{
++	/*  Booted at EL2? */
++	if (!is_hyp_mode_available() && !is_kernel_in_hyp_mode())
++		return false;
++
++	if (!is_midr_in_range_list(cap->midr_range_list))
++		return false;
++
++	/*
++	 * Calls with scope == SCOPE_LOCAL_CPU need only testing whether this
++	 * cpu has the feature. A later 'system' scope call will check for a
++	 * firmware description.
++	 */
++	if (scope == SCOPE_LOCAL_CPU)
++		return true;
++
++	if (!__system_matches_cap(ARM64_HAS_PBHA_STAGE1))
++		return false;
++
++	return !!arm64_pbha_stage2_safe_bits;
++}
+ #endif /* CONFIG_ARM64_PBHA */
+ 
+ #ifdef CONFIG_ARM64_AMU_EXTN
+@@ -3273,6 +3372,12 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
+ 		.cpu_enable = cpu_enable_pbha,
+ 		ARM64_CPUID_FIELDS(ID_AA64MMFR1_EL1, HPDS, HPDS2)
+ 	},
++	{
++		.capability = ARM64_HAS_PBHA_STAGE2,
++		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
++		.matches = plat_can_use_pbha_stage2,
++		.midr_range_list = pbha_stage2_wins,
++	},
+ #endif
+ #ifdef CONFIG_ARM64_SME
+ 	{
+diff --git a/arch/arm64/kernel/image-vars.h b/arch/arm64/kernel/image-vars.h
+index ef942592d767..8027ee7867d4 100644
+--- a/arch/arm64/kernel/image-vars.h
++++ b/arch/arm64/kernel/image-vars.h
+@@ -113,6 +113,8 @@ KVM_NVHE_ALIAS(kvm_protected_mode_initialized);
+ 
+ /* Capability of non-cacheable snooping */
+ KVM_NVHE_ALIAS(kvm_ncsnp_support);
++/* PBHA bits for stage2 */
++KVM_NVHE_ALIAS(arm64_pbha_stage2_safe_bits);
+ 
+ #endif /* CONFIG_KVM */
+ 
+diff --git a/arch/arm64/kvm/hyp/pgtable.c b/arch/arm64/kvm/hyp/pgtable.c
+index c1d66fa7c054..48a010e4fe96 100644
+--- a/arch/arm64/kvm/hyp/pgtable.c
++++ b/arch/arm64/kvm/hyp/pgtable.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <asm/cpufeature.h>
+ #include <asm/kvm_pgtable.h>
+ #include <asm/stage2_pgtable.h>
+ 
+@@ -626,7 +627,7 @@ struct stage2_map_data {
+ u64 kvm_get_vtcr(u64 mmfr0, u64 mmfr1, u32 phys_shift)
+ {
+ 	u64 vtcr = VTCR_EL2_FLAGS;
+-	u8 lvls;
++	u8 lvls, pbha = 0xf;
+ 
+ 	vtcr |= kvm_get_parange(mmfr0) << VTCR_EL2_PS_SHIFT;
+ 	vtcr |= VTCR_EL2_T0SZ(phys_shift);
+@@ -661,9 +662,13 @@ u64 kvm_get_vtcr(u64 mmfr0, u64 mmfr1, u32 phys_shift)
+ 	 * value will always be 0, which is defined as the safe default
+ 	 * setting. On Cortex cores, enabling PBHA for stage2 effectively
+ 	 * disables it for stage1.
++	 * When the HAS_PBHA_STAGE2 feature is supported, clear the 'safe'
++	 * bits to allow the guest's stage1 to use these bits.
+ 	 */
++	if (cpus_have_final_cap(ARM64_HAS_PBHA_STAGE2))
++		pbha = pbha ^ arm64_pbha_stage2_safe_bits;
+ 	if (cpus_have_final_cap(ARM64_HAS_PBHA))
+-		vtcr |= FIELD_PREP(VTCR_EL2_PBHA_MASK, 0xf);
++		vtcr |= FIELD_PREP(VTCR_EL2_PBHA_MASK, pbha);
+ 
+ 	/* Set the vmid bits */
+ 	vtcr |= (get_vmid_bits(mmfr1) == 16) ?
+diff --git a/arch/arm64/tools/cpucaps b/arch/arm64/tools/cpucaps
+index 3564b98915c2..48553be3421c 100644
+--- a/arch/arm64/tools/cpucaps
++++ b/arch/arm64/tools/cpucaps
+@@ -123,7 +123,7 @@ HAS_SYSINSTR128
+ HAS_TLBID
+ HAS_PBHA
+ HAS_PBHA_STAGE1
+-KABI_RESERVE_16
++HAS_PBHA_STAGE2
+ KABI_RESERVE_17
+ KABI_RESERVE_18
+ KABI_RESERVE_19

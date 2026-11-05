@@ -1,0 +1,74 @@
+From b1e8af724113fda8529ec7492f5bb6ac743cf2b8 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 29 Oct 2026 17:54:57 +0800
+Subject: [PATCH OLK-6.6 v5 05/18] arm64: mm: Add pgprot_pbha() to allow
+ drivers to request PBHA values
+
+maillist inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+Reference: https://lore.kernel.org/all/20211015161416.2196-1-james.morse@arm.com/t/#u
+
+--------------------------------
+
+Add a pgprot_pbha() helper that modifies a pgprot_t to include a pbha
+value. The value is checked against those that were listed as only
+affecting performance.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+ arch/arm64/include/asm/pgtable-hwdef.h |  1 +
+ arch/arm64/include/asm/pgtable.h       | 12 ++++++++++++
+ arch/arm64/kernel/cpufeature.c         |  1 +
+ 3 files changed, 14 insertions(+)
+
+diff --git a/arch/arm64/include/asm/pgtable-hwdef.h b/arch/arm64/include/asm/pgtable-hwdef.h
+index 30f28b51b47e..6b2e95af2971 100644
+--- a/arch/arm64/include/asm/pgtable-hwdef.h
++++ b/arch/arm64/include/asm/pgtable-hwdef.h
+@@ -157,6 +157,7 @@
+ #define PTE_CONT		(_AT(pteval_t, 1) << 52)	/* Contiguous range */
+ #define PTE_PXN			(_AT(pteval_t, 1) << 53)	/* Privileged XN */
+ #define PTE_UXN			(_AT(pteval_t, 1) << 54)	/* User XN */
++#define PTE_PBHA_MASK		(_AT(pteval_t, 0xf) << 59)	/* Page Base Hardware Attributes */
+ 
+ #define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
+ #ifdef CONFIG_ARM64_PA_BITS_52
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 2be956bbab97..037c4233f5c8 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -637,6 +637,18 @@ static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
+ #define pgprot_tagged(prot) \
+ 	__pgprot_modify(prot, PTE_ATTRINDX_MASK, PTE_ATTRINDX(MT_NORMAL_TAGGED))
+ #define pgprot_mhp	pgprot_tagged
++
++extern unsigned long arm64_pbha_perf_only_values;
++static inline unsigned long __pbha_check_perf_only(unsigned long pbha_val)
++{
++	if (test_bit(pbha_val, &arm64_pbha_perf_only_values))
++		return FIELD_PREP(PTE_PBHA_MASK, pbha_val);
++	return 0;
++}
++
++#define pgprot_pbha(prot, pbha_val) \
++	__pgprot_modify(prot, PTE_PBHA_MASK, __pbha_check_perf_only(pbha_val))
++
+ /*
+  * DMA allocations for non-coherent devices use what the Arm architecture calls
+  * "Normal non-cacheable" memory, which permits speculation, unaligned accesses
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index bcfae671ca24..5c6d85c684a8 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -125,6 +125,7 @@ EXPORT_SYMBOL(arm64_use_ng_mappings);
+ DEFINE_PER_CPU_READ_MOSTLY(const char *, this_cpu_vector) = vectors;
+ 
+ unsigned long __ro_after_init arm64_pbha_perf_only_values;
++EXPORT_SYMBOL(arm64_pbha_perf_only_values);
+ 
+ /*
+  * Permit PER_LINUX32 and execve() of 32-bit binaries even if not all CPUs

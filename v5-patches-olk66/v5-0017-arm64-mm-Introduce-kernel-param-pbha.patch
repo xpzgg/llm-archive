@@ -1,0 +1,193 @@
+From d37904f211725ba55e9fcf10e202a20b95a56dfa Mon Sep 17 00:00:00 2001
+From: Ma Wupeng <mawupeng1@huawei.com>
+Date: Thu, 29 Oct 2026 17:55:09 +0800
+Subject: [PATCH OLK-6.6 v5 17/18] arm64: mm: Introduce kernel param pbha
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9826
+
+--------------------------------
+
+Introduce kernel param pbha to control the overall PBHA and PBHA bit0
+behavior. If pbha is added in bootarg, PBHA and PBHA bit 0 will be
+initialized.
+
+For PBHA bit 0, it accepts the following arg:
+
+  enable: kernel and user will update PBHA bit0 for their pte entry.
+  user: only select user task will update PBHA bit0 for pte entry.
+
+Signed-off-by: Ma Wupeng <mawupeng1@huawei.com>
+Signed-off-by: Fanhua Li <lifanhua5@huawei.com>
+Signed-off-by: Jiacheng Yu <yujiacheng3@huawei.com>
+---
+Changes in v4:
+ - restore %ld for the static key state; %d broke the aarch64 build
+
+Changes in v3:
+ - reject a NULL or unrecognized pbha= value
+---
+ .../admin-guide/kernel-parameters.txt         |  7 ++++
+ .../firmware/efi/libstub/efi-stub-helper.c    |  3 ++
+ drivers/firmware/efi/libstub/fdt.c            |  6 ++++
+ drivers/soc/hisilicon/pbha.c                  | 32 +++++++++++++++++--
+ include/linux/pbha.h                          | 11 +++++--
+ 5 files changed, 53 insertions(+), 6 deletions(-)
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index b287eed1e6f0..9507ad3d3629 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -7654,3 +7654,10 @@
+ 			Format: <int> {128, 256, 262, 512}
+ 			Default: 262
+ 
++	pbha=		[ARM64]
++			Format: { enable | user }
++			Enabled PBHA bit0.
++			enable	kernel and user will update PBHA bit0 for their
++				pte entry.
++			user	only select user task will update PBHA bit0 for
++				their pte entry.
+diff --git a/drivers/firmware/efi/libstub/efi-stub-helper.c b/drivers/firmware/efi/libstub/efi-stub-helper.c
+index 1718a406da92..4bd540b6ecd3 100644
+--- a/drivers/firmware/efi/libstub/efi-stub-helper.c
++++ b/drivers/firmware/efi/libstub/efi-stub-helper.c
+@@ -20,6 +20,7 @@
+ bool efi_nochunk;
+ bool efi_nokaslr = !IS_ENABLED(CONFIG_RANDOMIZE_BASE);
+ bool efi_novamap;
++bool efi_pbha;
+ 
+ static bool efi_noinitrd;
+ static bool efi_nosoftreserve;
+@@ -109,6 +110,8 @@ efi_status_t efi_parse_options(char const *cmdline)
+ 		} else if (!strcmp(param, "memmap") && val) {
+ 			mem_avoid_memmap(val);
+ #endif
++		} else if (!strcmp(param, "pbha")) {
++			efi_pbha = true;
+ 		}
+ 	}
+ 	efi_bs_call(free_pool, buf);
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index e304a36cf5e1..19f3a17aade6 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -30,6 +30,8 @@ static void fdt_update_cell_size(void *fdt)
+ }
+ 
+ #ifdef CONFIG_ARM64_PBHA
++extern bool efi_pbha;
++
+ static efi_status_t fdt_init_moc_mode(void *fdt, int node)
+ {
+ 	efi_guid_t oem_config_guid = EFI_OEMCONFIG_VARIABLE_GUID;
+@@ -40,6 +42,10 @@ static efi_status_t fdt_init_moc_mode(void *fdt, int node)
+ 	u8 fdt_val32;
+ 	u8 arr[16] = { 0x1 };
+ 
++	if (!efi_pbha)
++		goto out;
++
++	size = sizeof(moc_mode);
+ 	efi_status = get_efi_var(L"MemoryOnChipMode", &oem_config_guid, NULL, &size,
+ 				 &moc_mode);
+ 	if (efi_status != EFI_SUCCESS)
+diff --git a/drivers/soc/hisilicon/pbha.c b/drivers/soc/hisilicon/pbha.c
+index 5de5dbb89b6d..1385f08a9cdc 100644
+--- a/drivers/soc/hisilicon/pbha.c
++++ b/drivers/soc/hisilicon/pbha.c
+@@ -19,9 +19,10 @@
+ #include <asm/setup.h>
+ #include <linux/processor.h>
+ 
+-#define MOC_MODE_CACHE	1
++__ro_after_init DEFINE_STATIC_KEY_FALSE(pbha_bit0_enabled);
++__ro_after_init DEFINE_STATIC_KEY_FALSE(pbha_bit0_kernel_enabled);
+ 
+-bool __ro_after_init pbha_bit0_enabled;
++static bool pbha_enabled_phase_1;
+ 
+ void __init early_pbha_bit0_init(void)
+ {
+@@ -45,7 +46,7 @@ void __init early_pbha_bit0_init(void)
+ 	if (!prop)
+ 		return;
+ 	if (*prop == MOC_MODE_CACHE)
+-		pbha_bit0_enabled = true;
++		pbha_enabled_phase_1 = true;
+ }
+ 
+ #define pte_pbha_bit0(pte)                                                     \
+@@ -237,3 +238,28 @@ int pbha_bit0_update_vma(struct mm_struct *mm, int val)
+ 	mmap_write_unlock(mm);
+ 	return 0;
+ }
++
++static int __init setup_pbha(char *str)
++{
++	if (!pbha_enabled_phase_1)
++		return 0;
++
++	if (!str)
++		return -EINVAL;
++
++	if (strcmp(str, "enable") == 0) {
++		static_branch_enable(&pbha_bit0_enabled);
++		static_branch_enable(&pbha_bit0_kernel_enabled);
++	} else if (strcmp(str, "user") == 0) {
++		static_branch_enable(&pbha_bit0_enabled);
++	} else {
++		return -EINVAL;
++	}
++
++	if (static_branch_likely(&pbha_bit0_enabled))
++		pr_info("pbha bit_0 enabled, kernel: %ld\n",
++			static_branch_likely(&pbha_bit0_kernel_enabled));
++
++	return 0;
++}
++early_param("pbha", setup_pbha);
+diff --git a/include/linux/pbha.h b/include/linux/pbha.h
+index 14388ef2a26c..5c2c254e1216 100644
+--- a/include/linux/pbha.h
++++ b/include/linux/pbha.h
+@@ -21,7 +21,9 @@
+ #define MOC_MODE_CACHE	1
+ 
+ #ifdef CONFIG_ARM64_PBHA
+-extern bool __ro_after_init pbha_bit0_enabled;
++DECLARE_STATIC_KEY_FALSE(pbha_bit0_enabled);
++DECLARE_STATIC_KEY_FALSE(pbha_bit0_kernel_enabled);
++
+ extern struct mm_walk_ops pbha_bit0_walk_ops;
+ extern void __init early_pbha_bit0_init(void);
+ extern int pbha_bit0_update_vma(struct mm_struct *mm, int val);
+@@ -30,12 +32,13 @@ bool pbha_bit0_hide_file(const char *name);
+ 
+ static inline bool system_support_pbha_bit0(void)
+ {
+-	return pbha_bit0_enabled;
++	return static_branch_unlikely(&pbha_bit0_enabled);
+ }
+ 
+ static inline pgprot_t pgprot_pbha_bit0(pgprot_t prot)
+ {
+-	if (!system_support_pbha_bit0())
++	if (!system_support_pbha_bit0() ||
++	    !static_branch_unlikely(&pbha_bit0_kernel_enabled))
+ 		return prot;
+ 
+ 	return pgprot_pbha(prot, PBHA_VAL_BIT0);
+@@ -46,7 +49,9 @@ static inline pte_t maybe_mk_pbha_bit0(pte_t pte, struct vm_area_struct *vma)
+ 	if (!system_support_pbha_bit0())
+ 		return pte;
+ 
++	/* global init task will update pbha bit0 iff kernel can do this */
+ 	if (unlikely(is_global_init(current)) && vma->vm_mm == current->mm &&
++	    static_branch_unlikely(&pbha_bit0_kernel_enabled) &&
+ 	    !(vma->vm_flags & VM_PBHA_BIT0))
+ 		ACCESS_PRIVATE(vma, __vm_flags) |= VM_PBHA_BIT0;
+ 
