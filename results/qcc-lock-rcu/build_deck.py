@@ -28,10 +28,10 @@ ASQ = 'https://asq.org/quality-resources/fmea'
 prs = Presentation()
 prs.slide_width, prs.slide_height = Inches(16), Inches(9)
 prs.core_properties.title = '用 AI Agent 缩短 Lock/RCU 问题平均定位时长｜QCC 四页'
-prs.core_properties.subject = '2.1 原因分析；2.2 主疑因筛选；2.3 根因验证；2.4 拟定对策'
+prs.core_properties.subject = 'Lock/RCU 软件与平台排查；vmcore 分析；QCC 要因确认与对策'
 prs.core_properties.author = 'QCC 项目组'
 prs.core_properties.keywords = 'QCC, Lock, RCU, AI, Agent, 要因确认, 5W1H'
-prs.core_properties.comments = '四页补充材料。疑因与目标均标明状态，未填入虚构案例数据。'
+prs.core_properties.comments = '面向内核团队及 ESL/FPGA 软硬协同。流程疑因待案例确认；未填虚构效果数据。'
 checks, all_texts, preview_images = [], [], []
 slide = None
 canvas = None
@@ -151,13 +151,13 @@ def finish(notes, footer):
     canvas.resize((W,H), Image.Resampling.LANCZOS).save(out)
     preview_images.append(canvas.resize((W,H), Image.Resampling.LANCZOS))
 
-def table(x, y, widths, headers, rows, row_h, sizes=None):
+def table(x, y, widths, headers, rows, row_h, sizes=None, header_size=20):
     total = sum(widths)
     header_h = 52
     rect(x,y,total,header_h,NAVY)
     xx=x
     for head,ww in zip(headers,widths):
-        text(head,xx+16,y+14,ww-30,20,WHITE,True)
+        text(head,xx+16,y+14,ww-30,header_size,WHITE,True)
         xx+=ww
     yy=y+header_h
     for ri,row in enumerate(rows):
@@ -173,137 +173,137 @@ def table(x, y, widths, headers, rows, row_h, sizes=None):
         line(x,yy,x+total,yy,LINE,1)
     return yy
 
-# 2.1: horizontal, editable native tree.
-new_slide('2.1', '根因分析', '围绕“复现耗时”继续追问，拆到 AI / Agent 可改善、可验证的末端原因', '横向树图 · 疑因假设')
-text('定位问题',60,161,205,18,MUTED,True)
-text('耗时环节',330,161,235,18,MUTED,True)
-text('末端疑因（待案例确认）',625,161,525,18,MUTED,True)
-text('Agent 对应能力',1215,161,325,18,MUTED,True)
-line(265,427,300,427,BLUE,3)
-line(300,280,300,593,BLUE,3)
-for yy in (280,475,593): line(300,yy,330,yy,BLUE,3)
-line(565,280,595,280,BLUE,2)
-line(595,245,595,360,BLUE,2)
-line(595,245,625,245,BLUE,2)
-line(595,360,625,360,BLUE,2)
-for yy in (475,593): line(565,yy,625,yy,BLUE,2)
-for yy in (245,360,475,593): line(1150,yy,1215,yy,TEAL,2)
-rect(60,357,205,140,NAVY,radius=True)
-text('Lock / RCU',76,382,173,25,WHITE,True,'center')
-text('定位时间长',76,428,173,26,WHITE,True,'center')
-rect(330,230,235,100,PALE,radius=True)
-text('复现准备与等待',344,248,207,25,BLUE,True,'center')
-text('现状初步指向',344,290,207,18,MUTED,align='center')
-rect(330,430,235,90,PALE,radius=True)
-text('复现后追加采证',344,457,207,24,BLUE,True,'center')
-rect(330,548,235,90,PALE,radius=True)
-text('分析方向收敛慢',344,575,207,24,BLUE,True,'center')
-leaves=[
-    (200,'R1  触发条件未结构化','环境、负载、并发参数与操作顺序反复补齐','整理触发条件\n一次性补充问题'),
-    (315,'R2  复现与采证准备重复','脚本、观察点与预期结果逐单重新梳理','辅助生成脚本\n明确每轮观察目标'),
-    (430,'R3  首轮材料缺关键上下文','完整告警、相关 CPU / 任务栈需后续补采','整理现场证据\n识别缺口与关联线索'),
-    (548,'R4  源码与案例关联依赖手工','从等待栈到责任路径、相似案例需多轮检索','检索代码与案例\n给出有依据的候选'),
-]
-for yy,head,body,agent in leaves:
-    rect(625,yy,525,90,WHITE,LINE,True)
-    rect(625,yy,5,90,BLUE)
-    text(head,644,yy+12,488,24,INK,True)
-    text(body,644,yy+52,488,18,MUTED)
-    rect(1215,yy,325,90,'E6F4F2',radius=True)
-    text(agent,1231,yy+14,293,21,TEAL,True,lh=30)
-rect(60,690,1480,129,'EDF2F8',radius=True)
-text('源码解释的技术难点',80,706,380,19,NAVY,True)
-text('并发时序敏感\n多 CPU、任务与中断上下文相互作用',80,744,460,19,INK,lh=29)
-text('等待位置仍需向外追踪\n锁慢路径需要继续关联持有侧与调用者',580,744,455,19,INK,lh=29)
-text('RCU 告警可能对应多种成因\n需结合多次堆栈、宽限期与调度线索',1080,744,435,19,INK,lh=29)
-finish(
-    '说明：本页是待验证的流程疑因树，不是已经证明的组织根因。用户提供的症结仅为“初步看是问题复现”。AI 是对策手段，“缺少 AI”本身不作为根因。\n'
-    '源码只说明技术机制，不把当前仓库配置当作故障现场证据。\n'
-    '代码依据（工作区 HEAD c2b0dd453961）：\n'
-    '1. Documentation/locking/lockdep-design.rst:282-304，讨论多 CPU、多任务、中断上下文及罕见时序组合。\n'
-    '2. kernel/locking/qspinlock.c:328-421，queued_spin_lock_slowpath 的竞争与等待路径；include/asm-generic/qspinlock_types.h:14-43 定义 locked、pending、tail，不能将 tail CPU 直接等同持锁者。\n'
-    '3. kernel/locking/mutex.c:570 起，__mutex_lock_common 包含尝试加锁、自旋与等待路径。等待栈本身不能直接确定故障责任。\n'
-    '4. kernel/rcu/tree_stall.h:528、590、629、656，区分报告 stall 的 CPU、停滞 CPU/任务，以及 GP 线程饥饿等线索。\n'
-    '5. Documentation/RCU/stallwarn.rst:16-129、262-278、346-359，解释多种告警原因、连续栈比较及 detected by 的含义。\n'
-    f'QCC 方法依据：T/CAQ 10201—2024 第 4.1.6、4.1.7 节，{CAQ}',
-    '机制依据：locking / RCU 源码与配套文档；流程疑因须以问题单事实确认。详细来源见备注。')
 
-# 2.2: measurable screening, with no fictional scores.
-new_slide('2.2','主疑因筛选','按对定位耗时的实际贡献安排确认顺序，四项末端原因均逐条验证','调查表 + 耗时排列')
-rect(60,159,1480,89,NAVY,radius=True)
-text('先核实复现链路 R1 / R2',82,176,540,27,WHITE,True)
-text('依据：现状初判“复现耗时”\n顺序可随案例数据调整，不提前宣布要因',790,174,720,21,'D9E7FB',lh=30)
-rows=[
-    ['R1','触发条件未结构化','对照首次提交与后续补充：\n是否补问了影响触发的关键条件？','记录补问轮次、\n条件澄清带来的额外等待'],
-    ['R2','复现与采证准备重复','对照首版与有效脚本 / 采证方案：\n改了什么？为何需要重跑？','记录准备工时、\n因方案缺口增加的重跑等待'],
-    ['R3','首轮材料缺关键上下文','定位最终使用的关键日志 / 栈：\n首轮是否已有？何时补齐？','记录补采次数、\n证据后补造成的额外等待'],
-    ['R4','源码与案例关联依赖手工','回查关键线索首次出现的时间：\n何时关联到受证据支持的路径？','记录检索与研判工时；\n注明是否依赖新的现场信息'],
-]
-table(60,278,[95,330,620,435],['编号','末端疑因','从问题单提取的事实','影响程度记录'],rows,94,[22,22,21,21])
-rect(60,730,723,92,'E6F4F2',radius=True)
-text('排序依据',78,742,660,20,TEAL,True)
-text('汇总各疑因引入的可避免耗时，再绘制耗时排列图。',78,777,679,20,INK)
-rect(805,730,735,92,PALE_AMBER,radius=True)
-text('统计口径',823,742,680,20,AMBER,True)
-text('机器运行、资源排队单列；重叠时间只归属一项。',823,777,690,20,INK)
-finish(
-    '为什么不用 RPN：RPN 常见于 FMEA，用严重度、发生度、探测度进行风险优先级排序。本课题关注已发生的定位周期，应通过事实和数据确认末端原因对耗时症结的影响。RPN 评分或投票不能代替要因确认。\n'
-    '筛选仅表示确认优先顺序，所有末端原因仍逐条确认。本页不填虚构的 RPN 分数、耗时占比或排列图柱高。\n'
-    '首轮建议：选最近 5 个已结单的常规案例，覆盖 Lock 和 RCU，保留样本的选取范围；用于检查数据和流程，不用于声称统计显著性。后续效果评价沿用稳定的案例范围。\n'
-    '记录定位时间线中的事件和起止时间。不同原因的同一时间段只计一次；无法合理区分的区间保留未归因，不强行分配。分别记录工程师工时和案件经过时间，两者不能相加。\n'
-    'R1/R2 暂列优先是用户现状初判的工作假设；最终排序按实际可避免耗时调整。问题单分布 Lock/RCU 230、内存 150、异构 157、网络 262 仅提供业务规模，不证明根因或耗时排序。\n'
-    f'方法来源：T/CAQ 10201—2024 4.1.7，{CAQ}\nASQ FMEA：{ASQ}',
-    '方法：T/CAQ 10201—2024，4.1.7；RPN 用于 FMEA 风险排序，本页使用定位耗时事实。')
+RCU = 'https://www.kernel.org/doc/html/latest/RCU/stallwarn.html'
+CRASH = 'https://crash-utility.github.io/help_pages/bt.html'
+DRGN = 'https://drgn.readthedocs.io/en/latest/helpers.html#locking'
+ARM_TIME = 'https://docs.kernel.org/arch/arm64/booting.html'
+ARM_MODEL = 'https://documentation-service.arm.com/static/648c77ea153eb247a5450e70'
+ARM_IC = 'https://documentation-service.arm.com/static/683d2ddc771bba091ac6f76f?token='
 
-# 2.3: executable retrospective checks, no new live hang required.
-new_slide('2.3','根因验证','用已有问题单、脚本和日志回溯“缺口 → 追加工作 → 定位延迟”','要因确认 · 待回填')
-rect(60,158,1480,66,PALE,radius=True)
-text('首轮建议：最近 5 个已结单常规案例，覆盖 Lock / RCU；由原处理人每单回顾 20–30 分钟。',80,179,1440,22,BLUE,True)
-rows=[
-    ['R1\n触发条件未结构化','翻首次工单与补充回复；圈出后补的关键条件，\n核实该条件是否阻断了复现准备或有效尝试。','留存：前后记录链接、补问轮次、起止时间。\n确认点：条件缺失确实造成追加工作和等待。'],
-    ['R2\n复现与采证准备重复','比较首版与有效脚本 / 采证方案；标出新增的\n触发参数、观察点，以及由这些缺口造成的重跑。','留存：脚本差异、执行记录、额外轮次和耗时。\n确认点：准备缺口造成重复执行或无效采证。'],
-    ['R3\n首轮材料缺关键上下文','找到最终定位依赖的关键日志 / 栈；回查它\n是否在首轮缺失，以及补采后推进了哪一步。','留存：关键证据、首轮材料清单、补采时间。\n确认点：后补证据是当时继续分析的必要条件。'],
-    ['R4\n源码与案例关联依赖手工','把首次可用材料与结单依据并排核对；查明\n关键线索是否早已具备、何时才关联到代码路径。','留存：日志位置、源码路径、首次关联时间。\n确认点：延迟发生在检索 / 关联，而非新增取证。'],
+# 2.1: software, platform and day-to-day debugging causes in one horizontal tree.
+new_slide('2.1', '根因分析', 'Lock / RCU 告警只给出入口：还要查清谁在等、什么没前进，以及平台当时是否正常', '横向树图 · 待确认疑因')
+text('定位时间长',60,163,210,19,MUTED,True)
+text('领域与工作难点',320,163,260,19,MUTED,True)
+text('导致反复排查的具体疑因',610,163,930,19,MUTED,True)
+line(260,470,285,470,BLUE,3)
+line(285,290,285,650,BLUE,3)
+for cy in (290,470,650):
+    line(285,cy,320,cy,BLUE,3)
+    line(550,cy,580,cy,BLUE,2)
+    line(580,cy-45,580,cy+45,BLUE,2)
+    line(580,cy-45,610,cy-45,BLUE,2)
+    line(580,cy+45,610,cy+45,BLUE,2)
+rect(60,411,200,118,NAVY,radius=True)
+text('Lock / RCU',76,431,168,26,WHITE,True,'center')
+text('定位周期长',76,477,168,26,WHITE,True,'center')
+groups=[(237,'等待关系难还原','内核机制'),(417,'软硬件原因难分','ESL / FPGA'),(597,'补采与复现反复','日常排查')]
+for yy,head,sub in groups:
+    rect(320,yy,230,106,PALE,radius=True)
+    text(head,332,yy+19,206,25,BLUE,True,'center')
+    text(sub,332,yy+64,206,18,MUTED,align='center')
+causes=[
+    ('F1','跨 CPU 查等锁链，靠人工逐个还原','多核同卡慢路径；qspinlock 需结合锁地址、其他 CPU 栈与 MCS 节点追查'),
+    ('F2','RCU 卡在哪一步，需要反复比对','同一类 stall 可能来自缺 QS、GP 线程饥饿或 timer 唤醒失败'),
+    ('F3','低频、计时异常与真停滞混在一起','FPGA 主频/访存慢；ESL 计时模式各异，要结合进度、计时器和 IRQ 判断'),
+    ('F4','互联或中断异常，软硬证据对不上','互联响应、IRQ 投递可能异常；串口、硬件 trace、仿真事件要对到同一现场'),
+    ('F5','拿到现场后，材料仍不够用','vmcore、同版符号、全 CPU 栈与固件/镜像未成套，补采后才能继续'),
+    ('F6','复现一轮很久，却没拿到要验证的证据','低性能平台启动和触发慢；新增 printk / trace 又可能改变负载或时序'),
 ]
-table(60,252,[275,625,580],['疑因','怎么核实：直接使用留存材料','留下什么证据 / 如何判断'],rows,114,[22,21,20])
-rect(60,784,1480,43,'E6F4F2',radius=True)
-text('要因判定：证据链成立且对症结耗时贡献居前；证据不足则保留“未确认”，结论回填后再定正式对策。',79,795,1442,19,TEAL,True)
+for yy,(cid,head,body) in zip((205,295,385,475,565,655),causes):
+    rect(610,yy,930,80,WHITE,LINE,True)
+    rect(610,yy,5,80,TEAL if cid in ('F3','F4') else BLUE)
+    text(cid+'  '+head,630,yy+10,888,24,INK,True)
+    text(body,630,yy+49,888,19,MUTED)
+rect(60,768,1480,60,'E6F4F2',radius=True)
+text('改进重点：先利用已有现场减少盲查和补采，把昂贵的下一轮复现用于验证明确的假设。',80,787,1440,23,TEAL,True)
 finish(
-    '本页是一张可立即执行的要因确认表，尚无真实案例数据，不能写成“已验证通过”。\n'
-    '实施方式：原处理人打开问题单及当时保存的日志、脚本和补丁记录，在记录表中填证据链接、起止时间和结论。单个案例建议 20–30 分钟，5 个案例先完成一轮可行性核查。样本少时仅做初步确认。\n'
-    '不要求重新复现罕见 hang，不安排大规模环境复建，不以关闭/开启调试开关进行无依据的实验。\n'
-    'R1：只记录影响复现准备或有效尝试的关键遗漏，普通沟通不自动算作根因。\n'
-    'R2：仅归因于可查明的脚本或观测方案缺口，低概率自然触发的等待单独记录。\n'
-    'R3：需说明补齐哪个证据才使分析得以推进；不能将所有日志缺失都认定为要因。\n'
-    'R4：结单材料用于回查线索何时存在；如果必须依赖后来才出现的运行时信息，不把那段等待归为检索效率问题。\n'
-    '判定采用调查分析法：缺口真实存在，导致追加工作，有记录支持定位延迟；然后按影响程度确定主要原因。并不把 AI 回放速度当作根因存在的证明。\n'
-    f'QCC 依据：T/CAQ 10201—2024 4.1.7，允许现场测量、试验或调查分析，{CAQ}',
-    '确认方法：调查分析。20–30 分钟与 5 个案例是首轮执行建议；所有结果以留存记录为准。')
+    '本页分析的是定位周期长的原因。F1—F6 是结合团队 ESL/FPGA 与软芯协同背景提出的工作疑因，仍须用问题单记录确认；不能把某类硬件可能性写成已经查实的团队根因。\n'
+    'F1：当前参考源码 include/asm-generic/qspinlock_types.h 的原始 qspinlock 字段为 locked/pending/tail；tail 表示队尾等锁者，不能当持锁 CPU。若故障内核保留了调试 owner 信息，应先使用该信息。MCS 队列也可能在过渡状态，或包含复用节点，分析需要对照对应版本和全 CPU 栈。\n'
+    'F2：区分停滞 CPU/任务与打印告警的 CPU。源码 kernel/rcu/tree_stall.h 的 qsmask、GP 线程与 timer 诊断路径可作为工具设计依据。\n'
+    'F3：低频是平台条件，并不自动等同假告警。分别记录 CPU、内存、互联频率与系统计数器频率；核实 CNTFRQ/时间换算。ESL 还要说明仿真时间如何推进以及模型时序精度。Arm Fast Models 的 PV 模型只是一个具体例子，不代表所有 ESL 平台。\n'
+    'F4：待查硬件分支包括互联事务未返回、内存系统响应与 IRQ 投递异常。Linux 日志只提供软件观察面，硬件结论需要平台记录支持；对齐事件标记和时钟映射，不能直接把不同来源的时间戳排序。\n'
+    'F5/F6：是否存在符号不匹配、关键对象不可读、日志缺段或无效重跑，以历史案例为准。当前工作区配置不作为现场事实。\n'
+    f'技术来源：Linux RCU stall 文档 {RCU}；Arm64 booting {ARM_TIME}；Arm Fast Models 11.22 用户指南 p.25 {ARM_MODEL}。\n'
+    f'互联实例仅证明此类机制存在：Arm CI-700 erratum 3031700，{ARM_IC}，不主张本平台受其影响。\n'
+    f'QCC 原因分析与要因确认：T/CAQ 10201—2024 4.1.6—4.1.7，{CAQ}',
+    '源码与公开资料用于说明机制；六项工作疑因的发生情况、影响时长及主次，须由案例记录确认。')
 
-# 2.4: all six 5W1H fields, four capabilities in one agent workflow.
-new_slide('2.4','拟定对策','一个定位 Agent 串联四项能力，由领域工程师复核证据与下一步动作','5W1H · 拟定方案')
+# 2.2: distinguish measured cause priority from tool implementation order.
+new_slide('2.2','主疑因筛选','逐项核查补材料、人工分析和重复复现花了多久，再按可避免耗时排先后','调查表 · 按耗时排序')
 rect(60,155,1480,64,NAVY,radius=True)
-text('改进链路：条件整理  →  复现与采证准备  →  现场证据关联  →  源码 / 案例检索',80,175,1440,24,WHITE,True)
+text('先把时间拆开：取证与交接等待  /  人工分析工时  /  平台运行与复现等待',80,175,1440,24,WHITE,True)
 rows=[
-    ['R1 条件整理\n结构化输入','必填项全部填写\n或明确标缺','提取环境、负载、顺序与并发参数；\n生成一轮补充问题，工程师确认。','领域工程师\nAgent 开发','第 1 周','工单入口\n分析工作区'],
-    ['R2 复现与采证\n辅助生成脚本','首版脚本准备\n≤ 0.5 工作日','复用模板生成参数化脚本；写明观察点、\n预期结果与退出条件，审查后测试机试跑。','领域工程师\nAgent 开发','第 2 周','测试机\n脚本库'],
-    ['R3 证据关联\n整理日志与栈','关键判断 100%\n引用原始证据','归并多 CPU、多次告警；关联稳定栈、\n锁等待与 GP 线索，列出缺证及补采项。','领域工程师\nAgent 开发','第 2–3 周','日志 / 转储\n分析工作区'],
-    ['R4 代码与案例\n生成候选原因','≤ 1 小时输出\n首轮候选与动作','按版本检索调用路径与历史案例；\n每条候选附日志 / 代码依据及反证。','领域工程师\n案例库维护','第 3 周','版本化源码\n案例库'],
+    ['F1 跨 CPU 查锁','查了多少 CPU / 任务、跑了几轮命令？\n哪些时间花在重复翻栈、查锁对象？','vmcore + 同版符号 → crash / drgn 批量查栈和锁；\n可先封装，保留命令、地址和原始输出。'],
+    ['F2 判断 RCU 分支','多少次告警被反复比对？\n是否把报告 CPU 当成停滞 CPU 追查？','多次 stall + vmcore / RCU trace → 按 GP、CPU\n比对 QS、GP 线程和 timer 线索。'],
+    ['F3 核对平台时序','换频率、调超时、重新跑了几轮？\n何时才查清当时的频率与计时口径？','CPU/内存/互联频率 + 计时模式 + IRQ/进度记录\n→ 区分执行慢、时钟/中断异常与证据不足。'],
+    ['F4 对齐软硬证据','等平台日志、补寄存器和来回沟通多久？\n双方记录能否定位同一次异常？','串口 + 互联/仿真 trace + 寄存器快照\n→ 按共同事件对齐，列出需芯片侧确认的问题。'],
+    ['F5 补齐现场材料','是否重新索取符号、镜像或 dump？\n关键对象不可读是否造成再次取证？','vmcore + vmlinux/模块符号 + 镜像清单\n→ 校验版本、检查关键对象可读性，列缺项。'],
+    ['F6 重复复现','每轮想排除什么、实际新增了什么证据？\n哪些运行因观察点不够而重做？','旧脚本 + 当前假设 + 平台限制\n→ 选观察点、写预期现象与停止条件。'],
 ]
-table(60,249,[238,227,465,190,140,220],['对策 What','目标 Why','措施 How','负责人 Who','时间 When','地点 Where'],rows,105,[21,21,20,20,20,20])
-rect(60,742,1480,82,'E6F4F2',radius=True)
-text('第 4 周试用验收：常规问题平均定位时长目标 1–2 个工作日',80,754,1440,25,TEAL,True)
-text('统一口径：受理 → 根因证据经工程师确认，包含复现与协同等待；同时记录正确性、返工次数与人工复核工时。',80,793,1440,18,INK)
+table(60,234,[258,570,652],['疑因','从原问题单核查什么','Agent 所需输入与可做的工作'],rows,80,[21,20,20])
+rect(60,780,1480,48,'E6F4F2',radius=True)
+text('工具可从离线 vmcore 分析和材料检查起步；要因仍按实际耗时排序，全部六项逐条核查。',80,794,1440,21,TEAL,True)
 finish(
-    '本页是拟定方案。四项能力均对应待确认的末端原因；依据 2.3 的结论确定纳入正式执行的对策，不将未确认疑因直接写成已证实根因。\n'
-    '按 T/CAQ 10201—2024 4.1.8 使用 5W1H：What 对策、Why 目标、Who 负责人、Where 地点、When 时间、How 措施。5W2H 可额外加入 How much 费用，但不是本页必须项。\n'
-    '负责人为拟定角色，实际实施时替换成姓名。第 1 周从项目启动算起。所有时限、完整率和 1–2 日均是拟定目标，不是已经实现的效果。\n'
-    'Agent 做辅助分析和产物生成：给出可追溯依据、反证与下一步；工程师确认脚本及证据后再执行。锁等待路径、RCU 告警类型、检测 CPU 与停滞 CPU 都需要按实际材料区分。\n'
-    '对策效果检查的最小做法：保留 2.3 的案例材料副本，隐藏结论与最终修复；先用人工流程或历史可靠记录建立可比基线，再计时 Agent 生成 + 人工审查 + 修正的完整工时。用于检索的案例库剔除当前验收案例的答案。若比较两种流程，安排不同案例或处理人交叉使用，避免同一人知道答案后的熟悉效应。\n'
-    '脚本类产物先检查语法、参数和短时正常运行，无需为验收而强制触发真实 hang。只有实际现场的新问题试用，才能评估受理至根因确认的端到端工作日目标。离线回放分钟数不能换算成端到端定位日数。\n'
-    '常规问题口径在改善前后保持一致，保留长耗时与未结单个案；实际指标建议同时报告均值、样本量、目标内完成比例及未结单数量。当前未提供现状平均时长，因此不填写缩短百分比。\n'
-    f'方法来源：T/CAQ 10201—2024 4.1.8—4.1.10，{CAQ}',
-    '时限、角色与验收值为拟定目标；完成要因确认后执行。W1 从项目启动日起算。')
+    '筛选采用调查表与耗时分层，数据齐后再画排列图。此版不填写虚构的耗时占比、RPN 分数或排名。F1/F2/F5 的工具可先做，是因为可用旧材料离线试用，并不代表它们已经被证明是主要原因。\n'
+    '总体案件时长从受理到根因证据经工程师确认。工程师主动操作时间与案件经过时间分别记录，不能直接相加；重叠的等待区间只归属一项，无法区分的保留未归因。平台不可压缩的运行、排队和跨团队等待仍包含在总时长中，另列构成用于辨别改进空间。\n'
+    'crash 的 bt -a 可取各 CPU 活跃任务栈，foreach bt 可批量取任务栈，runq 用于观察调度队列。drgn 提供 mutex_owner 等对象查询；RCU 与 qspinlock 的细查应按内核版本封装，不能假定存在一个通用命令能证明所有锁根因。\n'
+    'Agent 的收益是减少重复操作、整理关系和提出下一步取证，而不是绕过 dump 缺失或硬件观测限制。无 dump 时使用现有全 CPU 栈/日志，并明确可完成的检查范围。\n'
+    f'工具依据：{CRASH}；https://crash-utility.github.io/help_pages/foreach.html；https://crash-utility.github.io/help_pages/runq.html；{DRGN}。\n'
+    f'QCC 方法：{CAQ}，4.1.7。RPN 属于 FMEA 风险排序（{ASQ}），不能代替此处的耗时事实确认。',
+    '筛选依据：案例事实与耗时。工具实现顺序不等同于要因排名；具体字段与版本要求见备注及输入清单。')
+
+# 2.3: retrospective confirmation, with a small separate dump-tool trial.
+new_slide('2.3','根因验证','直接使用留存的 dump、日志、脚本和交接记录，查明哪些环节确实造成了延迟','旧案例核查 · 待实测')
+rect(60,155,1480,64,PALE,radius=True)
+text('首轮建议：锁等待、RCU stall、ESL / FPGA 问题各取 1 个已结单案例；未覆盖的疑因保留待确认。',80,176,1440,22,BLUE,True)
+rows=[
+    ['F1 跨 CPU 查锁','回看旧 dump 的命令记录；对照结单依据，\n标出找等锁者、锁地址和相关 CPU 的步骤。','确认重复操作确实拖慢分析；\n记录人工工时及错误 / 漏查项。'],
+    ['F2 判断 RCU 分支','按同一 GP、CPU 比较连续告警或 trace；\n回查何时才分清缺 QS、GP 饥饿或 timer 问题。','记录分支判断的返工次数；\n补齐哪条证据后，分析方向才改变。'],
+    ['F3 核对平台时序','用已有运行记录核对镜像、负载、频率、\n计时模式、IRQ 与进度；比较当时的判断。','确认平台差异是否导致误判 / 返工；\n单凭调大超时后不报警，不能确认。'],
+    ['F4 对齐软硬证据','按共同事件对齐串口与现有平台记录；\n请芯片侧核实异常事务 / IRQ 是否成立。','记录补证与交接等待；\n无对应硬件证据，保留未确认。'],
+    ['F5 补齐现场材料','实际加载旧 dump，核对符号和关键对象；\n回查补齐前后，哪一步检查才得以继续。','留存加载结果与补材料记录；\n确认是否造成额外等待或重新取证。'],
+    ['F6 重复复现','比较每轮脚本、观察点和得到的日志；\n找出没有回答当前疑问、因而重跑的轮次。','记录无效轮次及运行时间；\n找出后来增加的有效观察点。'],
+]
+table(60,234,[280,650,550],['疑因','用现有材料怎么核实','确认依据与记录'],rows,80,[21,20,20])
+rect(60,778,1480,52,'E6F4F2',radius=True)
+text('另做 vmcore 小试：隐藏结单答案，人工与 Agent 按同一清单检查；核对结果，并计入加载、分析、复核与补查工时。',79,795,1440,19,TEAL,True)
+finish(
+    '要因确认采用调查分析，以“该问题确实出现—造成了哪些追加工作—耗时多大”为判定链。排序依据来自实际影响时间；本页不宣称已验证六项疑因，也不要求为填表重新触发罕见 hang。\n'
+    '先找三个现有已结单案例用于检查可行性，并逐项标记 F1—F6 是否有证据。锁等待和 RCU 案例优先选有旧 vmcore 的；平台案例使用已有日志/仿真记录。缺少某类资料就写未确认，不能用另一类症状替代。三个样本也不足以证明总体效率提升。\n'
+    'F3 对照时，保留镜像、负载、频率和时钟来源；不同版本或多个变量同时改变只能提供线索。若已有同负载不同频率的运行资料，可以比较进度和相关告警；不强制组织一轮新的频率扫描。\n'
+    'F4 硬件判断由相应平台/芯片责任人核实事务、IRQ、寄存器或仿真记录。没有硬件证据不能仅因软件卡在锁或 MMIO 路径就判互联故障。\n'
+    'vmcore 对策试用与根因确认分开记录：固定输出清单为各 CPU 栈、相关任务/锁地址与等待关系、RCU GP/CPU 状态、未能完成的检查。隐藏该案结单结论及修复补丁，并从案例检索库排除对应答案。由不了解结论的工程师分别处理不同样本，或交叉分配样本，避免同人二次分析的熟悉效应。\n'
+    '比较端到端人工投入，包含载入、命令执行、Agent 调用、人工复核和补查；同时记录墙钟耗时、错误项和遗漏项。由原处理人对照结单证据核验。只记录实测数值，不事先写“快几倍”或把纯模型输出时间当分析耗时。\n'
+    '一个 dump 是有限时刻的内存/寄存器现场，通常不能恢复之前所有事件或未记录的互联事务；这是一项基于 dump 数据性质的分析边界，所需时间序列或硬件证据须另补。\n'
+    f'方法：T/CAQ 10201—2024 4.1.7、4.1.9、4.1.10，{CAQ}；dump 数据性质参考 https://docs.kernel.org/admin-guide/kdump/kdump.html。',
+    '根因确认看证据及耗时贡献；Agent 是否更快另做小试，以核对后的实测结果为准。')
+
+# 2.4: four scoped tools, each tied to causes and concrete inputs.
+new_slide('2.4','拟定对策','先把工程师每天重复做的检查交给工具，再让 Agent 根据结果追问和查代码','5W1H · 拟定对策')
+rect(60,155,1480,64,NAVY,radius=True)
+text('先做两件事：材料能不能用  /  用旧 vmcore 把 CPU、锁与 RCU 状态一次查齐',80,175,1440,24,WHITE,True)
+rows=[
+    ['F5 现场包检查','必查项逐项有结果\n缺项一次列清','vmcore + 同版 vmlinux / 模块符号\n+ 镜像清单 → 核对版本和关键对象\n可读性，输出缺项及影响。','内核分析\n工具开发','第 1 周','离线分析机'],
+    ['F1 / F2\nvmcore 批量分析','旧案例关键项无错漏\n初查 + 复核工时\n逐例对比','按内核版本封装 crash / drgn：全 CPU\n栈、mutex owner、qspinlock 队列、\nRCU 状态；保留命令、地址和输出。','内核分析\n工具开发','第 2 周','离线分析机'],
+    ['F3 / F4\n平台联查','列清可疑 CPU / 地址\n及待核实的事务 / IRQ\n每项注明证据出处','频率 / 计时模式 + IRQ / 进度记录\n+ 串口 / 硬件 trace → 对齐同一事件，\n生成给芯片侧的具体核查项。','内核分析\n芯片 / 平台','第 3 周','原平台记录\n离线分析机'],
+    ['F6 定向复现','每轮验证 1 个假设\n有预期现象\n与停止条件','现有脚本 + 当前假设 → 查代码选\n最小观察点，限定采集范围和时长；\n测试人员审查后在原平台执行。','内核分析\n测试 / 平台','第 3–4 周','ESL / FPGA\n或原故障平台'],
+]
+table(60,249,[238,235,470,180,132,225],['对策 What','目标 Why','措施 How','负责人 Who','时间 When','地点 Where'],rows,109,[20,20,19,20,20,20],header_size=18)
+rect(60,755,1480,73,'E6F4F2',radius=True)
+text('验收目标：常规问题平均定位 1–2 个工作日',80,767,1440,25,TEAL,True)
+text('受理到根因证据确认；分析工时、平台运行与协同等待分别记录，ESL / FPGA 按同一范围分层比较。',80,805,1440,18,INK)
+finish(
+    '5W1H 表为拟定安排：负责人先填角色，启动时落实姓名；第 1 周起点是项目启动日。通过要因确认的项目进入正式对策，未确认项先保留调查。1—2 工作日是用户既定目标，不是已经达到的结果。\n'
+    '现场包检查需核对实际 dump 与符号/模块构建，不以当前工作区配置推断现场。dump 经过过滤并不等于不可用，重点判断本次诊断必需对象是否可读取。\n'
+    'vmcore 是最适合先试的工具方向之一：基础命令结果交给确定性的解析器，Agent 用这些结果选择下一条查询、关联源码和解释证据。原始 dump 保留在分析机，模型接收有地址和上下文的查询结果，不把整个内存镜像塞入上下文。\n'
+    '锁分析：mutex 可读 owner；qspinlock 的 tail/MCS 是等锁队列，不能直接给出持锁者。若故障内核有可靠调试 owner 信息则优先用它；没有时结合调用路径和全 CPU 栈缩小范围。读取失败、节点复用或过渡状态必须保留，不能补造确定关系。\n'
+    'RCU 分析可借鉴本仓库 scripts/parse_rcu_gp.py 的按 GP/CPU 整理方式，但需先验证对应内核 trace 格式与 CPU hotplug 等场景。缺少某事件只说明记录未包含该事件，不直接证明从未发生。\n'
+    '平台联查由已有适配脚本读取经平台确认的寄存器/trace，Agent 负责对照、解释与提出问题。频率记录要区分 CPU/内存/互联与系统计数器，仿真/guest/host 时间需要明确映射。当前仅准备工具输入和任务要求，尚未实现或测量这些 Agent 工具。\n'
+    '验收保留原有常规问题范围；等待硬件分析、平台运行和取证的时间不得为了达标而删掉。分别统计有 dump 与无 dump、ESL、FPGA、硅片环境，使用相同起止点比较平均定位时长，并列样本量、未结单数与错误/返工情况。\n'
+    f'工具来源：{CRASH}；{DRGN}。参考已有 results/qspinlock_mcs_walk.md 和 scripts/parse_rcu_gp.py 时按内核版本复核。\n'
+    f'QCC 对策要求：T/CAQ 10201—2024 4.1.8，{CAQ}',
+    '角色、排期与指标为拟定值；工具输入清单随材料归档。实际提效以旧案例小试和后续问题单统计为准。')
 
 pptx_path = OUT / 'Lock_RCU_QCC_AI_Agent_4slides.pptx'
 prs.save(pptx_path)
@@ -312,14 +312,19 @@ overview = Image.new('RGB',(1600,900),'#E3EAF2')
 for i,img in enumerate(preview_images):
     overview.paste(img.resize((792,445),Image.Resampling.LANCZOS),((i%2)*808,(i//2)*455))
 overview.save(OUT/'overview.png')
-(OUT/'slide-content.json').write_text(json.dumps(all_texts,ensure_ascii=False,indent=2),encoding='utf-8')
-(OUT/'layout-check.json').write_text(json.dumps(checks,ensure_ascii=False,indent=2),encoding='utf-8')
-with (OUT/'要因确认记录表.csv').open('w',encoding='utf-8-sig',newline='') as f:
-    writer=csv.writer(f, lineterminator='\n')
-    writer.writerow(['案例编号（待填）','Lock或RCU','疑因编号','缺口事实及记录链接','追加工作及记录链接','影响区间开始','影响区间结束','可归因经过时间（小时）','人工工时（小时，单列）','与其他项有无重叠','确认/非要因/证据不足','原处理人复核'])
-    for case in range(1,6):
-        for cause in range(1,5):
-            writer.writerow([f'样本{case}（待填）','',f'R{cause}','','','','','','','','待确认',''])
+(OUT/'slide-content.json').write_text(json.dumps(all_texts,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+(OUT/'layout-check.json').write_text(json.dumps(checks,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+# Keep filled-in investigation records when regenerating the slides.
+record_path = OUT/'要因确认记录表.csv'
+if not record_path.exists():
+    with record_path.open('w',encoding='utf-8-sig',newline='') as f:
+        writer=csv.writer(f, lineterminator='\n')
+        writer.writerow(['案例编号（待填）','Lock/RCU','平台与镜像版本','疑因编号','疑因内容','缺口/重复工作及证据链接','追加工作及证据链接','影响区间开始','影响区间结束','可归因经过时间（小时）','人工工时（小时，单列）','重叠区间处理','确认/非要因/未确认/不适用','原处理人与平台侧复核'])
+        for case in range(1,4):
+            for cid,title,_ in causes:
+                writer.writerow([f'样本{case}（待填）','','',cid,title,'','','','','','','','未确认',''])
+
 check_prs=Presentation(pptx_path)
 assert len(check_prs.slides)==4
 assert all(len(s.notes_slide.notes_text_frame.text)>400 for s in check_prs.slides)

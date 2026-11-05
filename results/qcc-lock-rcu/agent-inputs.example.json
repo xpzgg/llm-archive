@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "case_id": null,
+  "symptom": null,
+  "platform": {
+    "type": null,
+    "model_or_bitstream_version": null,
+    "firmware_version": null,
+    "board_revision": null,
+    "cpu_topology_file": null,
+    "cpu_frequency_hz": null,
+    "memory_frequency_hz": null,
+    "interconnect_frequency_hz": null,
+    "system_counter_frequency_hz": null,
+    "simulation_time_mode": null,
+    "model_timing_fidelity": null,
+    "time_domain_mapping_file": null
+  },
+  "kernel": {
+    "release": null,
+    "build_id": null,
+    "source_revision": null,
+    "vmlinux_path": null,
+    "module_debug_paths": [],
+    "incident_kernel_config_path": null,
+    "boot_args_path": null,
+    "dtb_or_acpi_path": null
+  },
+  "incident_artifacts": {
+    "vmcore_path": null,
+    "dump_capture_method": null,
+    "dump_filter_options": null,
+    "capture_log_path": null,
+    "serial_log_path": null,
+    "stall_log_paths": [],
+    "all_cpu_stack_paths": [],
+    "rcu_trace_paths": [],
+    "irq_counter_snapshots": [],
+    "workload_progress_paths": [],
+    "platform_trace_paths": [],
+    "platform_register_snapshot_paths": [],
+    "platform_register_definition_version": null,
+    "shared_event_markers": []
+  },
+  "reproduction": {
+    "script_path": null,
+    "workload_parameters_path": null,
+    "cpu_affinity": null,
+    "current_hypothesis": null,
+    "observation_points": [],
+    "expected_observations": [],
+    "stop_conditions": []
+  },
+  "tool_outputs": {
+    "input_check_report_path": null,
+    "raw_command_output_dir": null,
+    "cpu_task_lock_relation_path": null,
+    "rcu_state_report_path": null,
+    "platform_event_comparison_path": null,
+    "unresolved_checks_path": null
+  }
+}
