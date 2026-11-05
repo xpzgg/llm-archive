@@ -1,6 +1,6 @@
 # 用 AI Agent 缩短 Lock/RCU 问题平均定位时长
 
-四页 QCC 评审稿：横向树图、S/O/D 与 RPN 筛选、九列根因确认表、六列拟定对策表。内容覆盖内核查锁、RCU stall、ESL/FPGA 低频与计时、互联/中断及软硬协同。
+四页 QCC 评审稿：横向树图、S/O/D 与 RPN 筛选、九列根因确认表、六列拟定对策表。后三页均为 PowerPoint 原生表格，可直接修改单元格、调整列宽和增删行。内容覆盖内核查锁、RCU stall、ESL/FPGA 低频与计时、互联/中断及软硬协同。
 
 **数据状态：30份材料、评分、耗时、确认结果及确认日期均为模拟填表示例，未开展对应的真实采样与验证。对策指标为拟定目标，尚无实测提效结果。**
 
@@ -20,7 +20,7 @@
 
 ## 2.2 主疑因筛选
 
-使用 **RPN = S × O × D**。本课题示例用 2/4/6/8/10 五档评分：S 按单例平均延迟，O 按模拟样本中的发生比例，D 按初诊识别难度。D 越高越难识别。筛选线 300 分是本例约定，不是通用标准。
+使用 **RPN = S × O × D**。筛选表保留“排序、末端原因、S、O、D、RPN、筛选结果”七列，评分规则放在表格上方。本课题示例用 2/4/6/8/10 五档评分：S 按单例平均延迟，O 按模拟样本中的发生比例，D 按初诊识别难度。D 越高越难识别。筛选线 300 分是本例约定，不是通用标准。
 
 | 末端原因 | S | O | D | RPN | 筛选 |
 |---|---:|---:|---:|---:|---|
@@ -67,7 +67,7 @@
 
 ## 修改与重新生成
 
-[review-data.example.json](review-data.example.json) 保存示例数据、量表、职责和对策；[build_deck.py](build_deck.py) 负责计算 RPN、计数与占比，并生成四页材料。PPT 中的文字、框线和树图可编辑；PDF/PNG 为同一布局脚本生成的预览，并非 PowerPoint 应用截图。评分口径、技术边界和来源另见 PPT 备注及[研究依据](输入与依据.md)。
+[review-data.example.json](review-data.example.json) 保存示例数据、量表、职责和对策；[build_deck.py](build_deck.py) 负责计算 RPN、计数与占比，并生成四页材料。后三页各有一个原生表格，文字存储在单元格内，可直接在 PowerPoint/WPS 中编辑；第一页面向树图的文字、框线也可编辑。PDF/PNG 为同一布局脚本生成的预览，并非 PowerPoint 应用截图。评分口径、技术边界和来源另见 PPT 备注及[研究依据](输入与依据.md)。
 
 ```sh
 cd results/qcc-lock-rcu
@@ -78,4 +78,4 @@ python -m venv /tmp/qcc-deck-venv
 
 验证环境为 Python 3.13，使用 Noto Sans CJK。默认读取 Linux 的 `/usr/share/fonts/opentype/noto/` 字体文件；其他系统可用 `QCC_FONT_REGULAR`、`QCC_FONT_BOLD`、`QCC_FONT_INDEX`、`QCC_FONT_NAME` 指定字体，普通 TTF/OTF 的索引通常为 `0`。
 
-脚本会覆盖 PPT、PDF、图片、生成内容 JSON 和四个 `.example.csv`；手工修改的文件请先另存。已有实际取证记录表 `要因确认记录表.csv` 和 Agent 输入模板会保留。脚本校验 RPN 乘积、评分分档、30例与352h合计、四页结构和文字边界；这些检查不代表资料真实性已被验证。
+脚本会覆盖 PPT、PDF、图片、生成内容 JSON 和四个 `.example.csv`；手工修改的文件请先另存。已有实际取证记录表 `要因确认记录表.csv` 和 Agent 输入模板会保留。脚本校验 RPN 乘积、评分分档、30例与352h合计、四页结构、三个原生表格的列数与单元格文字，以及文字边界；这些检查不代表资料真实性已被验证。

@@ -9,7 +9,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.oxml.xmlchemy import OxmlElement
 
 OUT = Path(__file__).resolve().parent
@@ -32,7 +32,7 @@ prs.core_properties.subject = 'Lock/RCU 软件与平台排查；vmcore 分析；
 prs.core_properties.author = 'QCC 项目组'
 prs.core_properties.keywords = 'QCC, Lock, RCU, AI, Agent, RPN, SOD, 要因确认, 华为红'
 prs.core_properties.comments = '使用华为红C7000B。30份材料、评分与确认结果均为模拟示例，非真实采样；对策目标未实测。'
-checks, all_texts, preview_images = [], [], []
+checks, all_texts, preview_images, table_specs = [], [], [], []
 slide = None
 canvas = None
 draw = None
@@ -248,36 +248,106 @@ assert {c['id'] for c in items if c['screened']} == {c['id'] for c in major_item
 
 def review_table(x,y,widths,headers,rows,row_h,sizes,header_h=50,pad=10,
                  alignments=None,emphasis=None,header_size=19):
+    """Create one real PowerPoint table, then draw its separate PNG preview.
+
+    Table cell text is never duplicated in overlaid textboxes. This keeps cell
+    editing, column resizing and row insertion available in PowerPoint/WPS.
+    """
+    assert len(widths)==len(headers)==len(sizes)
+    assert all(len(row)==len(headers) for row in rows)
     total=sum(widths)
-    rect(x,y,total,header_h,'F1F1F1')
-    line(x,y,x+total,y,RED,3)
-    xx=x
-    for ci,(head,ww) in enumerate(zip(headers,widths)):
-        hh=len(wrap_text(head,header_size,ww-2*pad,True))*header_size*1.25
-        text(head,xx+pad,y+(header_h-hh)/2,ww-2*pad,header_size,INK,True,
-             'center' if alignments and alignments[ci]=='center' else 'left',lh=header_size*1.25)
-        if hh>header_h-8:
-            checks.append({'kind':'table_header_height','text':head})
-        xx+=ww
-    yy=y+header_h
-    for ri,row in enumerate(rows):
-        assert len(row)==len(widths)
-        marked=bool(emphasis and emphasis[ri])
-        rect(x,yy,total,row_h,'FFF7F7' if marked else (WHITE if ri%2==0 else 'FAFAFA'))
+    height=header_h+len(rows)*row_h
+    bounds(x,y,total,height,'table')
+    frame=slide.shapes.add_table(len(rows)+1,len(headers),Inches(x/100),Inches(y/100),
+                                 Inches(total/100),Inches(height/100))
+    frame.name=f'QCC {all_texts[-1]["section"]} 可编辑表格'
+    tbl=frame.table
+    tbl.first_row=tbl.first_col=tbl.last_row=tbl.last_col=False
+    tbl.horz_banding=tbl.vert_banding=False
+    for column,width in zip(tbl.columns,widths):
+        column.width=Inches(width/100)
+    tbl.rows[0].height=Inches(header_h/100)
+    for table_row in list(tbl.rows)[1:]:
+        table_row.height=Inches(row_h/100)
+
+    values=[headers]+rows
+    table_specs.append({'slide_index':len(prs.slides)-1,'values':values})
+    yy=y
+    for ri,row in enumerate(values):
+        is_header=ri==0
+        cell_h=header_h if is_header else row_h
+        marked=bool(not is_header and emphasis and emphasis[ri-1])
+        bg='F1F1F1' if is_header else ('FFF7F7' if marked else (WHITE if (ri-1)%2==0 else 'FAFAFA'))
         xx=x
-        for ci,(value,ww,sz) in enumerate(zip(row,widths,sizes)):
-            bold = ci==0 or (marked and ci==len(row)-1)
-            color = RED if bold else INK
-            used=text(str(value),xx+pad,yy+pad,ww-2*pad,sz,color,bold,
-                      alignments[ci] if alignments else 'left',lh=sz*1.25)
-            if used>row_h-2*pad+.1:
-                checks.append({'kind':'review_table_cell_height','row':ri,'col':ci,'text':value,
-                               'used':used,'available':row_h-2*pad})
-            if ci:
-                line(xx,yy,xx,yy+row_h,LINE,.7)
+        for ci,(value,ww) in enumerate(zip(row,widths)):
+            value=str(value)
+            sz=header_size if is_header else sizes[ci]
+            bold=is_header or ci==0 or (marked and ci==len(row)-1)
+            color=RED if not is_header and bold else INK
+            alignment=alignments[ci] if alignments else 'left'
+            cell=tbl.cell(ri,ci)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb=rgb(bg)
+            cell.margin_left=cell.margin_right=Inches(pad/100)
+            cell.margin_top=cell.margin_bottom=Inches(pad/100)
+            cell.vertical_anchor=MSO_ANCHOR.MIDDLE
+            tf=cell.text_frame
+            tf.word_wrap=True
+            tf.auto_size=MSO_AUTO_SIZE.NONE
+            tf.text=value
+            for p in tf.paragraphs:
+                p.alignment={'left':PP_ALIGN.LEFT,'center':PP_ALIGN.CENTER,'right':PP_ALIGN.RIGHT}[alignment]
+                p.space_before=p.space_after=Pt(0)
+                p.line_spacing=Pt(sz*.72*1.25)
+                # Format defaults as well as existing runs so later edits inherit
+                # the cell's font, size and colour instead of the theme defaults.
+                for fmt in [p.font]+[run.font for run in p.runs]:
+                    fmt.name=FONT_NAME
+                    fmt.size=Pt(sz*.72)
+                    fmt.bold=bold
+                    fmt.color.rgb=rgb(color)
+                    fmt._rPr.set('lang','zh-CN')
+                    ea=OxmlElement('a:ea')
+                    ea.set('typeface',FONT_NAME)
+                    fmt._rPr.append(ea)
+            tcpr=cell._tc.get_or_add_tcPr()
+            for border_index,side in enumerate(('L','R','T','B')):
+                border=OxmlElement('a:ln'+side)
+                top=is_header and side=='T'
+                border.set('w',str(Pt((3 if top else .7)*.72)))
+                fill=OxmlElement('a:solidFill')
+                stroke=OxmlElement('a:srgbClr')
+                stroke.set('val',RED if top else LINE)
+                fill.append(stroke)
+                border.append(fill)
+                # DrawingML requires line properties before the cell fill.
+                tcpr.insert(border_index,border)
+
+            # Preview drawing deliberately bypasses rect()/text()/line(), since
+            # those helpers also create slide shapes above the editable cells.
+            draw.rectangle((xx*SCALE,yy*SCALE,(xx+ww)*SCALE,(yy+cell_h)*SCALE),
+                           fill='#'+bg,outline='#'+LINE,width=1)
+            wrapped=wrap_text(value,sz,ww-2*pad,bold)
+            lh=sz*1.25
+            used=len(wrapped)*lh
+            available=cell_h-2*pad
+            if used>available+.1:
+                checks.append({'kind':'table_cell_height','row':ri,'col':ci,'text':value,
+                               'used':used,'available':available})
+            top_y=yy+(cell_h-used)/2
+            for line_no,part in enumerate(wrapped):
+                actual=font(sz,bold,SCALE).getlength(part)
+                tx=(xx+pad)*SCALE
+                if alignment=='center':
+                    tx+=(ww*SCALE-2*pad*SCALE-actual)/2
+                elif alignment=='right':
+                    tx+=ww*SCALE-2*pad*SCALE-actual
+                draw.text((tx,(top_y+line_no*lh)*SCALE),part,
+                          font=font(sz,bold,SCALE),fill='#'+color,anchor='lt')
+            all_texts[-1]['text'].append(value)
             xx+=ww
-        yy+=row_h
-        line(x,yy,x+total,yy,LINE,1)
+        yy+=cell_h
+    draw.line((x*SCALE,y*SCALE,(x+total)*SCALE,y*SCALE),fill='#'+RED,width=3*SCALE)
     return yy
 
 new_slide('2.2','主疑因筛选','借用 FMEA 的 S / O / D 评分，按对定位时长的影响筛选主疑因','RPN筛选 · 示例数据')
@@ -294,12 +364,11 @@ for xx,title,body in [
 rpn_rows=[]
 for rank,c in enumerate(ranked,1):
     rpn_rows.append([str(rank),c['id']+' '+c['name'],str(c['S']),str(c['O']),str(c['D']),str(c['rpn']),
-                    f"{c['n']}/{sample_n}例（{c['n']/sample_n:.1%}）；平均延迟{c['mean']:g}h\n{c['d_basis']}",
                     '列入主疑因' if c['screened'] else '保留核查'])
-review_table(60,340,[64,310,66,66,66,100,570,238],
-             ['排序','末端原因','S','O','D','RPN','赋分依据（模拟数据 / 经验）','筛选结果'],
-             rpn_rows,66,[19,19.5,23,23,23,23,18,21],header_h=48,pad=8,
-             alignments=['center','left','center','center','center','center','left','center'],
+review_table(60,340,[80,660,100,100,100,160,280],
+             ['排序','末端原因','S','O','D','RPN','筛选结果'],
+             rpn_rows,66,[23,24,26,26,26,28,23],header_h=48,pad=8,
+             alignments=['center','left','center','center','center','center','center'],
              emphasis=[c['screened'] for c in ranked])
 text('筛选结果：F4、F1、F6、F2 列为主疑因；六项末端原因仍逐项确认，低 RPN 不直接判为非要因。',76,799,1450,22,RED,True)
 finish(
@@ -378,7 +447,7 @@ def export_csv(filename,headers,rows):
 export_csv('采样明细.example.csv',
            ['数据性质','示例编号','症状','平台','主要延迟原因编号','主要延迟原因','归因延迟（工作时段小时）','情景设定（非真实记录）','原始材料'],case_rows)
 export_csv('RPN评分.example.csv',
-           ['数据性质','排序','末端原因','S','O','D','RPN','赋分依据','筛选结果'],
+           ['数据性质','排序','末端原因','S','O','D','RPN','筛选结果'],
            [['模拟示例，非实测']+r for r in rpn_rows])
 export_csv('根因确认.example.csv',confirmation_headers,
            [[c['id'],c['name'],c['confirmation_content'],c['confirmation_method'],c['confirmation_standard'],
@@ -411,5 +480,13 @@ if not record_path.exists():
 check_prs=Presentation(pptx_path)
 assert len(check_prs.slides)==4
 assert all(len(s.notes_slide.notes_text_frame.text)>400 for s in check_prs.slides)
+assert [sum(s.has_table for s in page.shapes) for page in check_prs.slides]==[0,1,1,1]
+for spec in table_specs:
+    native=[s.table for s in check_prs.slides[spec['slide_index']].shapes if s.has_table][0]
+    assert len(native.rows)==len(spec['values'])
+    assert len(native.columns)==len(spec['values'][0])
+    for ri,row in enumerate(spec['values']):
+        for ci,value in enumerate(row):
+            assert native.cell(ri,ci).text==str(value)
 assert not checks, checks
-print(json.dumps({'pptx':str(pptx_path),'slides':len(check_prs.slides),'layout_issues':checks,'native_shapes':sum(len(s.shapes) for s in check_prs.slides)},ensure_ascii=False))
+print(json.dumps({'pptx':str(pptx_path),'slides':len(check_prs.slides),'layout_issues':checks,'native_tables':len(table_specs),'table_columns':[len(s['values'][0]) for s in table_specs],'native_shapes':sum(len(s.shapes) for s in check_prs.slides)},ensure_ascii=False))
