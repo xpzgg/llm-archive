@@ -68,7 +68,7 @@
   "renderImageInMarkdownToPDF": false,
   "allowPinchZoom": false,
   "allowWheelZoom": false,
-  "zoomToFitOnOpen": true,
+  "zoomToFitOnOpen": false,
   "zoomToFitOnResize": false,
   "zoomToFitMaxLevel": 2,
   "zoomStep": 0.05,
