@@ -57,7 +57,7 @@
   "matchTheme": false,
   "matchThemeAlways": false,
   "matchThemeTrigger": false,
-  "defaultMode": "normal",
+  "defaultMode": "view",
   "defaultPenMode": "never",
   "penModeDoubleTapEraser": true,
   "penModeSingleFingerPanning": true,
