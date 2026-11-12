@@ -1,0 +1,108 @@
+diff --git a/drivers/irqchip/irq-gic-common.c b/drivers/irqchip/irq-gic-common.c
+index afd6a1841715..d76c8c6ed043 100644
+--- a/drivers/irqchip/irq-gic-common.c
++++ b/drivers/irqchip/irq-gic-common.c
+@@ -10,6 +10,8 @@
+ 
+ #include "irq-gic-common.h"
+ 
++#define gic_cfg_trace(fmt, ...)	pr_info("GICDBG: " fmt, ##__VA_ARGS__)
++
+ static DEFINE_RAW_SPINLOCK(irq_controller_lock);
+ 
+ void gic_enable_of_quirks(const struct device_node *np,
+@@ -98,6 +100,7 @@ void gic_dist_config(void __iomem *base, int gic_irqs,
+ 	/*
+ 	 * Set all global interrupts to be level triggered, active low.
+ 	 */
++	gic_cfg_trace("dist_config: ICFGR\n");
+ 	for (i = 32; i < gic_irqs; i += 16)
+ 		writel_relaxed(GICD_INT_ACTLOW_LVLTRIG,
+ 					base + GIC_DIST_CONFIG + i / 4);
+@@ -105,6 +108,7 @@ void gic_dist_config(void __iomem *base, int gic_irqs,
+ 	/*
+ 	 * Set priority on all global interrupts.
+ 	 */
++	gic_cfg_trace("dist_config: IPRIORITYR\n");
+ 	for (i = 32; i < gic_irqs; i += 4)
+ 		writel_relaxed(GICD_INT_DEF_PRI_X4, base + GIC_DIST_PRI + i);
+ 
+@@ -112,6 +116,7 @@ void gic_dist_config(void __iomem *base, int gic_irqs,
+ 	 * Deactivate and disable all SPIs. Leave the PPI and SGIs
+ 	 * alone as they are in the redistributor registers on GICv3.
+ 	 */
++	gic_cfg_trace("dist_config: ICACTIVER/ICENABLER\n");
+ 	for (i = 32; i < gic_irqs; i += 32) {
+ 		writel_relaxed(GICD_INT_EN_CLR_X32,
+ 			       base + GIC_DIST_ACTIVE_CLEAR + i / 8);
+diff --git a/drivers/irqchip/irq-gic-v3.c b/drivers/irqchip/irq-gic-v3.c
+index f16c3d5731a9..f3aa9ad07a0a 100644
+--- a/drivers/irqchip/irq-gic-v3.c
++++ b/drivers/irqchip/irq-gic-v3.c
+@@ -6,6 +6,8 @@
+ 
+ #define pr_fmt(fmt)	"GICv3: " fmt
+ 
++#define gic_trace(fmt, ...)	pr_info("GICDBG: " fmt, ##__VA_ARGS__)
++
+ #include <linux/acpi.h>
+ #include <linux/cpu.h>
+ #include <linux/cpu_pm.h>
+@@ -268,6 +270,8 @@ static void gic_do_wait_for_rwp(void __iomem *base, u32 bit)
+ {
+ 	u32 count = 1000000;	/* 1s! */
+ 
++	gic_trace("rwp: base=%px bit=%#x\n", base, bit);
++
+ 	while (readl_relaxed(base + GICD_CTLR) & bit) {
+ 		count--;
+ 		if (!count) {
+@@ -1230,6 +1234,7 @@ static void __init gic_dist_init(void)
+ 	u32 val;
+ 
+ 	/* Disable the distributor */
++	gic_trace("dist_init: GICD_CTLR=0\n");
+ 	writel_relaxed(0, base + GICD_CTLR);
+ 	gic_dist_wait_for_rwp();
+ 
+@@ -1239,6 +1244,7 @@ static void __init gic_dist_init(void)
+ 	 * do the right thing if the kernel is running in secure mode,
+ 	 * but that's not the intended use case anyway.
+ 	 */
++	gic_trace("dist_init: IGROUPR\n");
+ 	for (i = 32; i < GIC_LINE_NR; i += 32)
+ 		writel_relaxed(~0, base + GICD_IGROUPR + i / 8);
+ 
+@@ -1267,6 +1273,7 @@ static void __init gic_dist_init(void)
+ 	}
+ 
+ 	/* Enable distributor with ARE, Group1, and wait for it to drain */
++	gic_trace("dist_init: GICD_CTLR=%#x\n", val);
+ 	writel_relaxed(val, base + GICD_CTLR);
+ 	gic_dist_wait_for_rwp();
+ 
+@@ -1275,6 +1282,7 @@ static void __init gic_dist_init(void)
+ 	 * enabled.
+ 	 */
+ 	affinity = gic_cpu_to_affinity(smp_processor_id());
++	gic_trace("dist_init: IROUTER\n");
+ 	for (i = 32; i < GIC_LINE_NR; i++)
+ 		gic_write_irouter(affinity, base + GICD_IROUTER + i * 8);
+ 
+@@ -1292,6 +1300,8 @@ static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
+ 		u64 typer;
+ 		u32 reg;
+ 
++		gic_trace("iter: region=%d/%d ptr=%px GICR_PIDR2\n",
++			   i, gic_data.nr_redist_regions, ptr);
+ 		reg = readl_relaxed(ptr + GICR_PIDR2) & GIC_PIDR2_ARCH_MASK;
+ 		if (reg != GIC_PIDR2_ARCH_GICv3 &&
+ 		    reg != GIC_PIDR2_ARCH_GICv4) { /* We're in trouble... */
+@@ -1299,6 +1309,7 @@ static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
+ 			break;
+ 		}
+ 
++		gic_trace("iter: ptr=%px GICR_TYPER\n", ptr);
+ 		do {
+ 			typer = gic_read_typer(ptr + GICR_TYPER);
+ 			ret = fn(gic_data.redist_regions + i, ptr);
