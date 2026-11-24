@@ -114,8 +114,6 @@
 
 ### 笔记 / 问题
 
-复习笔记（整篇概述 + 理解不到位的地方）：[arm64-booting-rst-review.md](arm64-booting-rst-review.md)
-
 bootloader's duty:
 - 初始化RAM
 - setup device tree
